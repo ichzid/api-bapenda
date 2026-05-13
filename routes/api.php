@@ -9,3 +9,4 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 
 Route::get('/realisasi-pajak', [RealisasiController::class, 'getRealisasi']);
+Route::get('/realisasi-pajak/{jenisPajak}/detail', [RealisasiController::class, 'getRealisasiDetail']);

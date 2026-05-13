@@ -66,11 +66,11 @@ return [
 
         'simpada' => [
             'driver' => env('DB_SIMPADA_CONNECTION', 'mysql'),
-            'host' => env('DB_SIMPADA_HOST', '192.168.50.4'),
+            'host' => env('DB_SIMPADA_HOST', '127.0.0.1'),
             'port' => env('DB_SIMPADA_PORT', '3306'),
-            'database' => env('DB_SIMPADA_DATABASE', 'esim_pada'),
-            'username' => env('DB_SIMPADA_USERNAME', 'esim_pada'),
-            'password' => env('DB_SIMPADA_PASSWORD', '4tW7Efza56mLpdW8'),
+            'database' => env('DB_SIMPADA_DATABASE', ''),
+            'username' => env('DB_SIMPADA_USERNAME', ''),
+            'password' => env('DB_SIMPADA_PASSWORD', ''),
             'charset' => 'utf8mb4',
             'collation' => 'utf8mb4_unicode_ci',
             'prefix' => '',
@@ -84,11 +84,11 @@ return [
 
         'epbb_db' => [
             'driver' => env('DB_EPBB_CONNECTION', 'mysql'),
-            'host' => env('DB_EPBB_HOST', '192.168.50.4'),
+            'host' => env('DB_EPBB_HOST', '127.0.0.1'),
             'port' => env('DB_EPBB_PORT', '3306'),
-            'database' => env('DB_EPBB_DATABASE', 'epbb_db'),
-            'username' => env('DB_EPBB_USERNAME', 'epbb_db'),
-            'password' => env('DB_EPBB_PASSWORD', 'Fnh2tZ7XX6DcdNFw'),
+            'database' => env('DB_EPBB_DATABASE', ''),
+            'username' => env('DB_EPBB_USERNAME', ''),
+            'password' => env('DB_EPBB_PASSWORD', ''),
             'charset' => 'utf8mb4',
             'collation' => 'utf8mb4_unicode_ci',
             'prefix' => '',

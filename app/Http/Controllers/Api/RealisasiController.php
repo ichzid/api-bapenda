@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\Sts;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class RealisasiController extends Controller
 {
@@ -49,17 +50,25 @@ class RealisasiController extends Controller
                 $target = $targetData[$jenisAsli] ?? 0;
                 $selisih = $realisasi - $target;
                 $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+                $detailTersedia = $this->isDetailAvailableForJenis($jenisAsli);
 
                 // Accumulate totals
                 $totalTargetKeseluruhan += $target;
                 $totalRealisasiKeseluruhan += $realisasi;
 
                 return [
-                    'jenis_pajak' => $namaBaru,
-                    'target'      => $target,
-                    'realisasi'   => $realisasi,
-                    'persentase'  => round($persentase, 2),
-                    'selisih'     => $selisih,
+                    'jenis_pajak'       => $namaBaru,
+                    'kode_jenis_pajak'  => $jenisAsli,
+                    'slug_jenis_pajak'  => Str::slug($jenisAsli),
+                    'sumber_data'       => $this->resolveSumberData($jenisAsli),
+                    'detail_tersedia'   => $detailTersedia,
+                    'detail_endpoint'   => $detailTersedia
+                        ? '/api/realisasi-pajak/' . Str::slug($jenisAsli) . '/detail'
+                        : null,
+                    'target'            => $target,
+                    'realisasi'         => $realisasi,
+                    'persentase'        => round($persentase, 2),
+                    'selisih'           => $selisih,
                 ];
             })->values();
 
@@ -90,6 +99,111 @@ class RealisasiController extends Controller
     }
 
     /**
+     * Get detail realisasi untuk satu jenis pajak dari STS History.
+     */
+    public function getRealisasiDetail(Request $request, string $jenisPajak)
+    {
+        $tahun = $request->input('tahun', Carbon::now()->year);
+        $page = max($request->integer('page', 1), 1);
+        $perPage = min(max($request->integer('per_page', $request->integer('limit', 10)), 1), 100);
+
+        $jenisPajakMapping = $this->getJenisPajakMapping();
+        $jenisAsli = $this->resolveJenisPajak($jenisPajak, $jenisPajakMapping);
+
+        if (! $jenisAsli) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Jenis pajak tidak ditemukan.',
+            ], 404);
+        }
+
+        if (! $this->isDetailAvailableForJenis($jenisAsli)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Detail untuk jenis pajak ini belum tersedia.',
+            ], 422);
+        }
+
+        try {
+            $query = $this->buildStsDetailQuery($tahun, $jenisAsli);
+            $target = $this->getTargets()[$jenisAsli] ?? 0;
+            $realisasi = (float) (clone $query)->sum('Nilai');
+            $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+            $jumlahTransaksi = (clone $query)->count();
+
+            $pembayaranPaginator = (clone $query)
+                ->select([
+                    'No_STS',
+                    'No_SSPD',
+                    'No_Ketetapan',
+                    'No_Pokok_WP',
+                    'Nama_Pemilik',
+                    'Alamat_Pemilik',
+                    'Mata_Anggaran',
+                    'Nilai',
+                    'Denda',
+                    'Tgl_Bayar',
+                    'Nama_Channel',
+                    'Pembayaran_Ke',
+                    'kode_pembayaran',
+                ])
+                ->orderByDesc('Tgl_Bayar')
+                ->orderByDesc('No_STS')
+                ->paginate($perPage, ['*'], 'page', $page);
+
+            $pembayaranData = collect($pembayaranPaginator->items())
+                ->map(fn ($item) => $this->formatPembayaranItem($item))
+                ->values();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Detail realisasi pajak berhasil diambil.',
+                'data' => [
+                    'jenis_pajak' => [
+                        'kode' => $jenisAsli,
+                        'slug' => Str::slug($jenisAsli),
+                        'nama' => $jenisPajakMapping[$jenisAsli],
+                        'sumber_data' => 'sts_history',
+                    ],
+                    'ringkasan' => [
+                        'target' => $target,
+                        'realisasi' => $realisasi,
+                        'persentase_capaian' => round($persentase, 2),
+                        'sisa_anggaran' => $target - $realisasi,
+                        'jumlah_transaksi' => $jumlahTransaksi,
+                    ],
+                    'pembayaran' => [
+                        'data' => $pembayaranData,
+                        'pagination' => [
+                            'current_page' => $pembayaranPaginator->currentPage(),
+                            'per_page' => $pembayaranPaginator->perPage(),
+                            'total' => $pembayaranPaginator->total(),
+                            'last_page' => $pembayaranPaginator->lastPage(),
+                            'from' => $pembayaranPaginator->firstItem(),
+                            'to' => $pembayaranPaginator->lastItem(),
+                            'has_more_pages' => $pembayaranPaginator->hasMorePages(),
+                        ],
+                        'sorting' => [
+                            'sort_by' => 'Tgl_Bayar',
+                            'sort_direction' => 'desc',
+                        ],
+                    ],
+                ],
+                'filters' => [
+                    'tahun' => (int) $tahun,
+                    'page' => $pembayaranPaginator->currentPage(),
+                    'per_page' => $pembayaranPaginator->perPage(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Mengambil data utama dari tabel STS History
      */
     private function fetchMainRealisasi($tahun, array $jenisPajakKeys)
@@ -100,6 +214,43 @@ class RealisasiController extends Controller
             ->whereYear('Tgl_Bayar', $tahun)
             ->groupBy('Jn_Pajak')
             ->get();
+    }
+
+    /**
+     * Query dasar detail pembayaran STS untuk satu jenis pajak.
+     */
+    private function buildStsDetailQuery($tahun, string $jenisPajak)
+    {
+        return Sts::query()
+            ->where('Jn_Pajak', $jenisPajak)
+            ->where('Status_Bayar', 1)
+            ->whereYear('Tgl_Bayar', $tahun);
+    }
+
+    /**
+     * Format item pembayaran agar konsisten untuk frontend.
+     */
+    private function formatPembayaranItem(object $item): array
+    {
+        $nilai = (float) $item->Nilai;
+        $denda = (float) $item->Denda;
+
+        return [
+            'no_sts' => $item->No_STS,
+            'no_sspd' => $item->No_SSPD,
+            'no_ketetapan' => $item->No_Ketetapan,
+            'no_pokok_wp' => $item->No_Pokok_WP,
+            'nama_pemilik' => $item->Nama_Pemilik,
+            'alamat_pemilik' => $item->Alamat_Pemilik,
+            'mata_anggaran' => $item->Mata_Anggaran,
+            'nilai' => $nilai,
+            'denda' => $denda,
+            'total_bayar' => $nilai + $denda,
+            'tgl_bayar' => $item->Tgl_Bayar,
+            'nama_channel' => $item->Nama_Channel,
+            'pembayaran_ke' => $item->Pembayaran_Ke,
+            'kode_pembayaran' => $item->kode_pembayaran,
+        ];
     }
 
     /**
@@ -166,6 +317,52 @@ class RealisasiController extends Controller
             'Opsen BBNKB' => 'Opsen BBNKB',
             'Retribusi' => 'Retribusi Lainnya'
         ];
+    }
+
+    /**
+     * Jenis pajak yang detail-nya belum dilayani oleh endpoint STS.
+     */
+    private function getUnsupportedDetailJenis(): array
+    {
+        return ['PBB', 'Opsen PKB', 'Opsen BBNKB'];
+    }
+
+    /**
+     * Menentukan apakah detail tersedia dari sumber STS.
+     */
+    private function isDetailAvailableForJenis(string $jenisPajak): bool
+    {
+        return ! in_array($jenisPajak, $this->getUnsupportedDetailJenis(), true);
+    }
+
+    /**
+     * Resolve jenis pajak dari slug atau nama aslinya.
+     */
+    private function resolveJenisPajak(string $jenisPajak, array $jenisPajakMapping): ?string
+    {
+        if (array_key_exists($jenisPajak, $jenisPajakMapping)) {
+            return $jenisPajak;
+        }
+
+        foreach (array_keys($jenisPajakMapping) as $jenisAsli) {
+            if (Str::slug($jenisAsli) === $jenisPajak) {
+                return $jenisAsli;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Menentukan sumber data utama untuk tiap jenis pajak.
+     */
+    private function resolveSumberData(string $jenisPajak): string
+    {
+        return match ($jenisPajak) {
+            'PBB' => 'epbb_db',
+            'Opsen PKB', 'Opsen BBNKB' => 'simpada',
+            default => 'sts_history',
+        };
     }
 
     /**

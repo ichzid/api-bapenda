@@ -134,18 +134,16 @@ class RealisasiController extends Controller
             $pembayaranPaginator = (clone $query)
                 ->select([
                     'No_STS',
-                    'No_SSPD',
-                    'No_Ketetapan',
+                    'No_NOP',
                     'No_Pokok_WP',
                     'Nama_Pemilik',
                     'Alamat_Pemilik',
-                    'Mata_Anggaran',
                     'Nilai',
                     'Denda',
                     'Tgl_Bayar',
+                    'Kode_Pengesahan',
+                    'Kode_Cab',
                     'Nama_Channel',
-                    'Pembayaran_Ke',
-                    'kode_pembayaran',
                 ])
                 ->orderByDesc('Tgl_Bayar')
                 ->orderByDesc('No_STS')
@@ -237,19 +235,17 @@ class RealisasiController extends Controller
 
         return [
             'no_sts' => $item->No_STS,
-            'no_sspd' => $item->No_SSPD,
-            'no_ketetapan' => $item->No_Ketetapan,
+            'no_nop' => $item->No_NOP,
             'no_pokok_wp' => $item->No_Pokok_WP,
             'nama_pemilik' => $item->Nama_Pemilik,
             'alamat_pemilik' => $item->Alamat_Pemilik,
-            'mata_anggaran' => $item->Mata_Anggaran,
             'nilai' => $nilai,
             'denda' => $denda,
             'total_bayar' => $nilai + $denda,
             'tgl_bayar' => $item->Tgl_Bayar,
+            'kode_pengesahan' => $item->Kode_Pengesahan,
+            'kode_cab' => $item->Kode_Cab,
             'nama_channel' => $item->Nama_Channel,
-            'pembayaran_ke' => $item->Pembayaran_Ke,
-            'kode_pembayaran' => $item->kode_pembayaran,
         ];
     }
 

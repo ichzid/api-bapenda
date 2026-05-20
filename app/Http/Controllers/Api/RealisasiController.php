@@ -153,6 +153,8 @@ class RealisasiController extends Controller
                 ->map(fn ($item) => $this->formatPembayaranItem($item))
                 ->values();
 
+            $topPembayar = $this->fetchTopPembayar(clone $query);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Detail realisasi pajak berhasil diambil.',
@@ -170,6 +172,7 @@ class RealisasiController extends Controller
                         'sisa_anggaran' => $target - $realisasi,
                         'jumlah_transaksi' => $jumlahTransaksi,
                     ],
+                    'top_pembayar' => $topPembayar,
                     'pembayaran' => [
                         'data' => $pembayaranData,
                         'pagination' => [
@@ -223,6 +226,36 @@ class RealisasiController extends Controller
             ->where('Jn_Pajak', $jenisPajak)
             ->where('Status_Bayar', 1)
             ->whereYear('Tgl_Bayar', $tahun);
+    }
+
+    /**
+     * Mengambil 10 pembayar dengan total akumulasi pembayaran tertinggi
+     * dalam satu jenis pajak dan tahun tertentu, dikelompokkan per WP.
+     */
+    private function fetchTopPembayar($query): array
+    {
+        $rows = (clone $query)
+            ->select([
+                'No_Pokok_WP',
+                'Nama_Pemilik',
+                DB::raw('SUM(Nilai) as total_nilai'),
+                DB::raw('SUM(Denda) as total_denda'),
+                DB::raw('SUM(Nilai + Denda) as total_bayar'),
+                DB::raw('COUNT(*) as jumlah_transaksi'),
+            ])
+            ->groupBy('No_Pokok_WP', 'Nama_Pemilik')
+            ->orderByDesc('total_bayar')
+            ->limit(10)
+            ->get();
+
+        return $rows->map(fn ($row) => [
+            'no_pokok_wp'      => $row->No_Pokok_WP,
+            'nama_pemilik'     => $row->Nama_Pemilik,
+            'total_nilai'      => (float) $row->total_nilai,
+            'total_denda'      => (float) $row->total_denda,
+            'total_bayar'      => (float) $row->total_bayar,
+            'jumlah_transaksi' => (int) $row->jumlah_transaksi,
+        ])->values()->all();
     }
 
     /**

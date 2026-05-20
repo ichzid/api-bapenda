@@ -113,6 +113,19 @@ Response structure:
 | `sisa_anggaran` | number | `target - realisasi` |
 | `jumlah_transaksi` | number | Total transaksi yang match dengan filter tahun |
 
+`data.top_pembayar` fields:
+
+Array berisi 10 wajib pajak dengan total akumulasi pembayaran tertinggi pada jenis pajak dan tahun yang diminta. Dikelompokkan per `No_Pokok_WP` + `Nama_Pemilik`, diurutkan dari yang terbesar.
+
+| Field | Type | Keterangan |
+| --- | --- | --- |
+| `no_pokok_wp` | string \| null | Nomor pokok wajib pajak (NPWPD) |
+| `nama_pemilik` | string \| null | Nama wajib pajak |
+| `total_nilai` | number | Akumulasi nilai pembayaran pokok |
+| `total_denda` | number | Akumulasi denda |
+| `total_bayar` | number | `total_nilai + total_denda` |
+| `jumlah_transaksi` | number | Jumlah transaksi milik WP ini pada periode tersebut |
+
 `data.pembayaran` fields:
 
 | Field | Type | Keterangan |

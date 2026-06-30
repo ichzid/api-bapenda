@@ -288,9 +288,10 @@ class RealisasiController extends Controller
                     'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
                     'p.jml_sppt_yg_dibayar as total_bayar',
                     'p.denda_sppt as denda',
-                    'p.tgl_pembayaran_sppt as Tgl_Bayar',
+                    'p.tgl_rekam_byr_sppt as Tgl_Bayar',
+                    'p.nip_rekam_byr_sppt as channel',
                 ])
-                ->orderByDesc('p.tgl_pembayaran_sppt')
+                ->orderByDesc('p.tgl_rekam_byr_sppt')
                 ->offset($offset)
                 ->limit($perPage + 1) // +1 untuk cek has_more
                 ->get();
@@ -326,10 +327,10 @@ class RealisasiController extends Controller
                 $nilaiPokok = $totalBayar - $denda;
 
                 return [
-                    'no_sts' => null,
+                    'no_sts' => '-',
                     'no_nop' => $nop,
                     'no_pokok_wp' => null,
-                    'nama_pemilik' => $spptNames[$nop] ?? 'NN',
+                    'nama_pemilik' => $spptNames[$nop] ?? '-',
                     'alamat_pemilik' => null,
                     'nilai' => $nilaiPokok,
                     'denda' => $denda,
@@ -337,7 +338,7 @@ class RealisasiController extends Controller
                     'tgl_bayar' => $item->Tgl_Bayar,
                     'kode_pengesahan' => null,
                     'kode_cab' => null,
-                    'nama_channel' => null,
+                    'nama_channel' => $item->channel ?? null,
                 ];
             })->values();
 

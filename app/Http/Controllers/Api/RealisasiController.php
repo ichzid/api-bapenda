@@ -250,11 +250,11 @@ class RealisasiController extends Controller
             $target = $this->getTargets()[$jenisAsli] ?? 0;
 
             // Ringkasan di-cache
-            $cacheKey = "pbb_detail_ringkasan_{$tahun}";
+            $cacheKey = "pbb_detail_ringkasan_v2_{$tahun}";
             $cachedRingkasan = Cache::remember($cacheKey, 30, function () use ($tahun, $target) {
                 $baseQuery = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
-                    ->whereYear('p.tgl_pembayaran_sppt', $tahun);
+                    ->whereYear('p.tgl_rekam_byr_sppt', $tahun);
 
                 $ringkasan = (clone $baseQuery)->select(
                     DB::raw('SUM(jml_sppt_yg_dibayar) as total_realisasi'),
@@ -276,11 +276,11 @@ class RealisasiController extends Controller
             $realisasi = $cachedRingkasan['realisasi'];
             $jumlahTransaksi = $cachedRingkasan['jumlah_transaksi'];
 
-            // Pagination — pakai simplePaginate (no expensive COUNT(*))
+            // Pagination — pakai LIMIT+OFFSET (tanpa COUNT(*))
             $offset = ($page - 1) * $perPage;
             $baseQuery = DB::connection('epbb_db')
                 ->table('pembayaran_sppt as p')
-                ->whereYear('p.tgl_pembayaran_sppt', $tahun);
+                ->whereYear('p.tgl_rekam_byr_sppt', $tahun);
 
             $rows = (clone $baseQuery)
                 ->select([
@@ -343,11 +343,11 @@ class RealisasiController extends Controller
             })->values();
 
             // Top Pembayar (di-cache)
-            $topCacheKey = "pbb_detail_top_{$tahun}";
+            $topCacheKey = "pbb_detail_top_v2_{$tahun}";
             $topPembayar = Cache::remember($topCacheKey, 30, function () use ($tahun) {
                 $topPembayarRaw = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
-                    ->whereYear('p.tgl_pembayaran_sppt', $tahun)
+                    ->whereYear('p.tgl_rekam_byr_sppt', $tahun)
                     ->select([
                         'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan',
                         'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
@@ -416,6 +416,8 @@ class RealisasiController extends Controller
                         'pagination' => [
                             'current_page' => $page,
                             'per_page' => $perPage,
+                            'total' => $jumlahTransaksi,
+                            'last_page' => (int) ceil($jumlahTransaksi / $perPage),
                             'has_more_pages' => $hasMore,
                             'from' => $offset + 1,
                             'to' => $offset + $pembayaranItems->count(),

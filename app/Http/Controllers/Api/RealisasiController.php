@@ -18,13 +18,13 @@ class RealisasiController extends Controller
     public function getRealisasi(Request $request)
     {
         $tahun = $request->input('tahun', Carbon::now()->year);
-        $cacheKey = "realisasi_overview_{$tahun}";
+        $cacheKey = "realisasi_overview_v2_{$tahun}";
 
-        return Cache::remember($cacheKey, 30, function () use ($tahun) {
-            $jenisPajak = $this->getJenisPajakMapping();
-            $targetData = $this->getTargets();
+        try {
+            $payload = Cache::remember($cacheKey, 30, function () use ($tahun) {
+                $jenisPajak = $this->getJenisPajakMapping();
+                $targetData = $this->getTargets();
 
-            try {
                 // Fetch raw realization data from all sources
                 $stsData = $this->fetchMainRealisasi($tahun, array_keys($jenisPajak));
                 $pbbRealisasi = $this->fetchDataPBB($tahun);
@@ -33,33 +33,30 @@ class RealisasiController extends Controller
                 $totalTargetKeseluruhan = 0;
                 $totalRealisasiKeseluruhan = 0;
 
-                // Process and merge data
-                $formattedData = collect($jenisPajak)->map(function ($namaBaru, $jenisAsli) use (
-                    $stsData, $targetData, $pbbRealisasi, $opsenData, &$totalTargetKeseluruhan, &$totalRealisasiKeseluruhan
-                ) {
-                    // Determine Realisasi
+                // Process and merge data — kembalikan array biasa, bukan Collection/Response
+                $formattedData = [];
+                foreach ($jenisPajak as $jenisAsli => $namaBaru) {
                     $realisasi = 0;
                     if ($jenisAsli === 'PBB') {
-                        $realisasi = $pbbRealisasi;
+                        $realisasi = (float) $pbbRealisasi;
                     } elseif ($jenisAsli === 'Opsen PKB') {
-                        $realisasi = $opsenData['pkb'];
+                        $realisasi = (float) ($opsenData['pkb'] ?? 0);
                     } elseif ($jenisAsli === 'Opsen BBNKB') {
-                        $realisasi = $opsenData['bbnkb'];
+                        $realisasi = (float) ($opsenData['bbnkb'] ?? 0);
                     } else {
                         $item = $stsData->firstWhere('Jn_Pajak', $jenisAsli);
                         $realisasi = $item ? (float) $item->total_realisasi : 0;
                     }
 
-                    $target = $targetData[$jenisAsli] ?? 0;
+                    $target = (float) ($targetData[$jenisAsli] ?? 0);
                     $selisih = $realisasi - $target;
                     $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
                     $detailTersedia = $this->isDetailAvailableForJenis($jenisAsli);
 
-                    // Accumulate totals
                     $totalTargetKeseluruhan += $target;
                     $totalRealisasiKeseluruhan += $realisasi;
 
-                    return [
+                    $formattedData[] = [
                         'jenis_pajak'       => $namaBaru,
                         'kode_jenis_pajak'  => $jenisAsli,
                         'slug_jenis_pajak'  => Str::slug($jenisAsli),
@@ -73,33 +70,34 @@ class RealisasiController extends Controller
                         'persentase'        => round($persentase, 2),
                         'selisih'           => $selisih,
                     ];
-                })->values();
+                }
 
-                // Calculate global achievement percentage
-                $persentaseGlobal = $totalTargetKeseluruhan > 0 
-                    ? ($totalRealisasiKeseluruhan / $totalTargetKeseluruhan) * 100 
+                $persentaseGlobal = $totalTargetKeseluruhan > 0
+                    ? ($totalRealisasiKeseluruhan / $totalTargetKeseluruhan) * 100
                     : 0;
 
-                return response()->json([
+                return [
                     'success'   => true,
                     'message'   => 'Data ringkasan realisasi & target berhasil diambil.',
-                    'tahun'     => $tahun,
+                    'tahun'     => (int) $tahun,
                     'ringkasan' => [
                         'total_target'       => $totalTargetKeseluruhan,
                         'total_realisasi'    => $totalRealisasiKeseluruhan,
                         'persentase_capaian' => round($persentaseGlobal, 2),
-                        'selisih_anggaran'   => $totalRealisasiKeseluruhan - $totalTargetKeseluruhan
+                        'selisih_anggaran'   => $totalRealisasiKeseluruhan - $totalTargetKeseluruhan,
                     ],
                     'rincian'   => $formattedData,
-                ]);
+                ];
+            });
 
-            } catch (\Exception $e) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Terjadi kesalahan: ' . $e->getMessage()
-                ], 500);
-            }
-        });
+            return response()->json($payload);
+        } catch (\Exception $e) {
+            Cache::forget($cacheKey);
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**

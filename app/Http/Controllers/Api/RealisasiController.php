@@ -250,7 +250,7 @@ class RealisasiController extends Controller
             $target = $this->getTargets()[$jenisAsli] ?? 0;
 
             // Ringkasan di-cache
-            $cacheKey = "pbb_detail_ringkasan_v3_{$tahun}";
+            $cacheKey = "pbb_detail_ringkasan_v4_{$tahun}";
             $cachedRingkasan = Cache::remember($cacheKey, 30, function () use ($tahun, $target) {
                 $baseQuery = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
@@ -547,13 +547,14 @@ class RealisasiController extends Controller
         try {
             $pbbData = DB::connection('epbb_db')
                 ->table('pembayaran_sppt')
-                ->whereYear('tgl_rekam_byr_sppt', $tahun)
+                ->where('tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
+                ->where('tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01')
                 ->select(DB::raw('SUM(jml_sppt_yg_dibayar) AS total_realisasi'))
                 ->first();
                 
             return $pbbData && $pbbData->total_realisasi ? (float) $pbbData->total_realisasi : 0;
         } catch (\Exception $e) {
-            return 0; // Biarkan 0 jika koneksi gagal atau tabel tidak ada
+            return 0;
         }
     }
 

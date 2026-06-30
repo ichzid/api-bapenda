@@ -7,14 +7,14 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Index pada tabel pembayaran_sppt di database epbb_db
+        // Aman dijalankan berulang kali — hanya CREATE INDEX IF NOT EXISTS
+        // Tidak menyentuh data, tidak mengubah kolom.
         DB::connection('epbb_db')->statement(
-            'CREATE INDEX idx_pbbsppt_tgl_bayar ON pembayaran_sppt(tgl_pembayaran_sppt)'
+            'CREATE INDEX IF NOT EXISTS idx_pbbsppt_tgl_bayar ON pembayaran_sppt(tgl_pembayaran_sppt)'
         );
 
-        // Composite index untuk NOP (kolom pembentuk NOP)
         DB::connection('epbb_db')->statement(
-            'CREATE INDEX idx_pbbsppt_nop ON pembayaran_sppt(kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op)'
+            'CREATE INDEX IF NOT EXISTS idx_pbbsppt_nop ON pembayaran_sppt(kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op)'
         );
     }
 

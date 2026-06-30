@@ -124,6 +124,10 @@ class RealisasiController extends Controller
             ], 422);
         }
 
+        if ($jenisAsli === 'PBB') {
+            return $this->getDetailPBB($tahun, $page, $perPage, $jenisAsli, $jenisPajakMapping);
+        }
+
         try {
             $query = $this->buildStsDetailQuery($tahun, $jenisAsli);
             $target = $this->getTargets()[$jenisAsli] ?? 0;
@@ -200,6 +204,139 @@ class RealisasiController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detail realisasi untuk PBB dari epbb_db
+     */
+    private function getDetailPBB($tahun, $page, $perPage, $jenisAsli, $jenisPajakMapping)
+    {
+        try {
+            $query = DB::connection('epbb_db')
+                ->table('pembayaran_sppt as p')
+                ->join('sppt as s', function ($join) {
+                    $join->on('p.kd_provinsi', '=', 's.kd_provinsi')
+                         ->on('p.kd_dati2', '=', 's.kd_dati2')
+                         ->on('p.kd_kecamatan', '=', 's.kd_kecamatan')
+                         ->on('p.kd_kelurahan', '=', 's.kd_kelurahan')
+                         ->on('p.kd_blok', '=', 's.kd_blok')
+                         ->on('p.no_urut', '=', 's.no_urut')
+                         ->on('p.kd_jns_op', '=', 's.kd_jns_op');
+                })
+                ->whereYear('p.tgl_pembayaran_sppt', $tahun);
+
+            $target = $this->getTargets()[$jenisAsli] ?? 0;
+            $realisasi = (float) (clone $query)->sum('p.jml_sppt_yg_dibayar');
+            $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+            $jumlahTransaksi = (clone $query)->count();
+
+            $pembayaranPaginator = (clone $query)
+                ->select([
+                    DB::raw("CONCAT(p.kd_provinsi, '.', p.kd_dati2, '.', p.kd_kecamatan, '.', p.kd_kelurahan, '.', p.kd_blok, '.', p.no_urut, '.', p.kd_jns_op) as No_NOP"),
+                    's.nm_wp_sppt as Nama_Pemilik',
+                    'p.jml_sppt_yg_dibayar as total_bayar',
+                    'p.denda_sppt as denda',
+                    'p.tgl_pembayaran_sppt as Tgl_Bayar',
+                ])
+                ->orderByDesc('p.tgl_pembayaran_sppt')
+                ->paginate($perPage, ['*'], 'page', $page);
+
+            $pembayaranData = collect($pembayaranPaginator->items())
+                ->map(function ($item) {
+                    $denda = (float) $item->denda;
+                    $totalBayar = (float) $item->total_bayar;
+                    $nilaiPokok = $totalBayar - $denda;
+
+                    return [
+                        'no_sts' => null,
+                        'no_nop' => $item->No_NOP,
+                        'no_pokok_wp' => null,
+                        'nama_pemilik' => $item->Nama_Pemilik,
+                        'alamat_pemilik' => null,
+                        'nilai' => $nilaiPokok,
+                        'denda' => $denda,
+                        'total_bayar' => $totalBayar,
+                        'tgl_bayar' => $item->Tgl_Bayar,
+                        'kode_pengesahan' => null,
+                        'kode_cab' => null,
+                        'nama_channel' => null,
+                    ];
+                })
+                ->values();
+
+            // Fetch Top Pembayar PBB
+            $topPembayarRows = (clone $query)
+                ->select([
+                    DB::raw("CONCAT(p.kd_provinsi, '.', p.kd_dati2, '.', p.kd_kecamatan, '.', p.kd_kelurahan, '.', p.kd_blok, '.', p.no_urut, '.', p.kd_jns_op) as No_NOP"),
+                    's.nm_wp_sppt as Nama_Pemilik',
+                    DB::raw('SUM(p.jml_sppt_yg_dibayar - p.denda_sppt) as total_nilai'),
+                    DB::raw('SUM(p.denda_sppt) as total_denda'),
+                    DB::raw('SUM(p.jml_sppt_yg_dibayar) as total_bayar'),
+                    DB::raw('COUNT(*) as jumlah_transaksi'),
+                ])
+                ->groupBy('No_NOP', 's.nm_wp_sppt')
+                ->orderByDesc('total_bayar')
+                ->limit(10)
+                ->get();
+
+            $topPembayar = $topPembayarRows->map(function ($row) {
+                return [
+                    'no_pokok_wp'      => $row->No_NOP, // Menggunakan NOP sebagai pengganti No Pokok WP untuk PBB
+                    'nama_pemilik'     => $row->Nama_Pemilik,
+                    'total_nilai'      => (float) $row->total_nilai,
+                    'total_denda'      => (float) $row->total_denda,
+                    'total_bayar'      => (float) $row->total_bayar,
+                    'jumlah_transaksi' => (int) $row->jumlah_transaksi,
+                ];
+            })->values()->all();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Detail realisasi pajak berhasil diambil.',
+                'data' => [
+                    'jenis_pajak' => [
+                        'kode' => $jenisAsli,
+                        'slug' => Str::slug($jenisAsli),
+                        'nama' => $jenisPajakMapping[$jenisAsli],
+                        'sumber_data' => 'epbb_db',
+                    ],
+                    'ringkasan' => [
+                        'target' => $target,
+                        'realisasi' => $realisasi,
+                        'persentase_capaian' => round($persentase, 2),
+                        'sisa_anggaran' => $target - $realisasi,
+                        'jumlah_transaksi' => $jumlahTransaksi,
+                    ],
+                    'top_pembayar' => $topPembayar,
+                    'pembayaran' => [
+                        'data' => $pembayaranData,
+                        'pagination' => [
+                            'current_page' => $pembayaranPaginator->currentPage(),
+                            'per_page' => $pembayaranPaginator->perPage(),
+                            'total' => $pembayaranPaginator->total(),
+                            'last_page' => $pembayaranPaginator->lastPage(),
+                            'from' => $pembayaranPaginator->firstItem(),
+                            'to' => $pembayaranPaginator->lastItem(),
+                            'has_more_pages' => $pembayaranPaginator->hasMorePages(),
+                        ],
+                        'sorting' => [
+                            'sort_by' => 'Tgl_Bayar',
+                            'sort_direction' => 'desc',
+                        ],
+                    ],
+                ],
+                'filters' => [
+                    'tahun' => (int) $tahun,
+                    'page' => $pembayaranPaginator->currentPage(),
+                    'per_page' => $pembayaranPaginator->perPage(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat mengambil data PBB: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -369,7 +506,7 @@ class RealisasiController extends Controller
      */
     private function getUnsupportedDetailJenis(): array
     {
-        return ['PBB', 'Opsen PKB', 'Opsen BBNKB'];
+        return ['Opsen PKB', 'Opsen BBNKB'];
     }
 
     /**

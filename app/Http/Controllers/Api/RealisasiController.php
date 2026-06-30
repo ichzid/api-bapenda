@@ -214,28 +214,28 @@ class RealisasiController extends Controller
     private function getDetailPBB($tahun, $page, $perPage, $jenisAsli, $jenisPajakMapping)
     {
         try {
-            $query = DB::connection('epbb_db')
+            // 1. Query dasar HANYA dari tabel pembayaran (tanpa JOIN) untuk performa
+            $baseQuery = DB::connection('epbb_db')
                 ->table('pembayaran_sppt as p')
-                ->join('sppt as s', function ($join) {
-                    $join->on('p.kd_provinsi', '=', 's.kd_provinsi')
-                         ->on('p.kd_dati2', '=', 's.kd_dati2')
-                         ->on('p.kd_kecamatan', '=', 's.kd_kecamatan')
-                         ->on('p.kd_kelurahan', '=', 's.kd_kelurahan')
-                         ->on('p.kd_blok', '=', 's.kd_blok')
-                         ->on('p.no_urut', '=', 's.no_urut')
-                         ->on('p.kd_jns_op', '=', 's.kd_jns_op');
-                })
                 ->whereYear('p.tgl_pembayaran_sppt', $tahun);
 
             $target = $this->getTargets()[$jenisAsli] ?? 0;
-            $realisasi = (float) (clone $query)->sum('p.jml_sppt_yg_dibayar');
-            $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
-            $jumlahTransaksi = (clone $query)->count();
 
-            $pembayaranPaginator = (clone $query)
+            // 2. Optimasi Ringkasan (Aggregate 1x tembak)
+            $ringkasan = (clone $baseQuery)
+                ->select(
+                    DB::raw('SUM(jml_sppt_yg_dibayar) as total_realisasi'),
+                    DB::raw('COUNT(*) as total_transaksi')
+                )->first();
+
+            $realisasi = (float) ($ringkasan->total_realisasi ?? 0);
+            $jumlahTransaksi = (int) ($ringkasan->total_transaksi ?? 0);
+            $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+
+            // 3. Ambil data pagination (Tanpa Join)
+            $pembayaranPaginator = (clone $baseQuery)
                 ->select([
-                    DB::raw("CONCAT(p.kd_provinsi, '.', p.kd_dati2, '.', p.kd_kecamatan, '.', p.kd_kelurahan, '.', p.kd_blok, '.', p.no_urut, '.', p.kd_jns_op) as No_NOP"),
-                    's.nm_wp_sppt as Nama_Pemilik',
+                    'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
                     'p.jml_sppt_yg_dibayar as total_bayar',
                     'p.denda_sppt as denda',
                     'p.tgl_pembayaran_sppt as Tgl_Bayar',
@@ -243,48 +243,101 @@ class RealisasiController extends Controller
                 ->orderByDesc('p.tgl_pembayaran_sppt')
                 ->paginate($perPage, ['*'], 'page', $page);
 
-            $pembayaranData = collect($pembayaranPaginator->items())
-                ->map(function ($item) {
-                    $denda = (float) $item->denda;
-                    $totalBayar = (float) $item->total_bayar;
-                    $nilaiPokok = $totalBayar - $denda;
+            // 4. Ambil NOP unik dari data pagination untuk JOIN nama_wp
+            $pembayaranItems = collect($pembayaranPaginator->items());
+            
+            // 5. Query nama WP secara terpisah hanya untuk data yang di-load
+            $spptNames = [];
+            if ($pembayaranItems->isNotEmpty()) {
+                $nops = $pembayaranItems->map(function ($item) {
+                    return [$item->kd_propinsi, $item->kd_dati2, $item->kd_kecamatan, $item->kd_kelurahan, $item->kd_blok, $item->no_urut, $item->kd_jns_op];
+                })->toArray();
 
-                    return [
-                        'no_sts' => null,
-                        'no_nop' => $item->No_NOP,
-                        'no_pokok_wp' => null,
-                        'nama_pemilik' => $item->Nama_Pemilik,
-                        'alamat_pemilik' => null,
-                        'nilai' => $nilaiPokok,
-                        'denda' => $denda,
-                        'total_bayar' => $totalBayar,
-                        'tgl_bayar' => $item->Tgl_Bayar,
-                        'kode_pengesahan' => null,
-                        'kode_cab' => null,
-                        'nama_channel' => null,
-                    ];
-                })
-                ->values();
+                $spptQuery = DB::connection('epbb_db')->table('sppt as s')->select('kd_propinsi', 'kd_dati2', 'kd_kecamatan', 'kd_kelurahan', 'kd_blok', 'no_urut', 'kd_jns_op', 'nm_wp_sppt');
+                
+                foreach ($nops as $nop) {
+                    $spptQuery->orWhere(function($q) use ($nop) {
+                        $q->where('kd_propinsi', $nop[0])
+                          ->where('kd_dati2', $nop[1])
+                          ->where('kd_kecamatan', $nop[2])
+                          ->where('kd_kelurahan', $nop[3])
+                          ->where('kd_blok', $nop[4])
+                          ->where('no_urut', $nop[5])
+                          ->where('kd_jns_op', $nop[6]);
+                    });
+                }
+                
+                $spptData = $spptQuery->get();
+                foreach ($spptData as $sppt) {
+                    $key = "{$sppt->kd_propinsi}.{$sppt->kd_dati2}.{$sppt->kd_kecamatan}.{$sppt->kd_kelurahan}.{$sppt->kd_blok}.{$sppt->no_urut}.{$sppt->kd_jns_op}";
+                    $spptNames[$key] = $sppt->nm_wp_sppt;
+                }
+            }
 
-            // Fetch Top Pembayar PBB
-            $topPembayarRows = (clone $query)
+            // 6. Mapping format data pagination
+            $pembayaranData = $pembayaranItems->map(function ($item) use ($spptNames) {
+                $nop = "{$item->kd_propinsi}.{$item->kd_dati2}.{$item->kd_kecamatan}.{$item->kd_kelurahan}.{$item->kd_blok}.{$item->no_urut}.{$item->kd_jns_op}";
+                $denda = (float) $item->denda;
+                $totalBayar = (float) $item->total_bayar;
+                $nilaiPokok = $totalBayar - $denda;
+
+                return [
+                    'no_sts' => null,
+                    'no_nop' => $nop,
+                    'no_pokok_wp' => null,
+                    'nama_pemilik' => $spptNames[$nop] ?? 'NN',
+                    'alamat_pemilik' => null,
+                    'nilai' => $nilaiPokok,
+                    'denda' => $denda,
+                    'total_bayar' => $totalBayar,
+                    'tgl_bayar' => $item->Tgl_Bayar,
+                    'kode_pengesahan' => null,
+                    'kode_cab' => null,
+                    'nama_channel' => null,
+                ];
+            })->values();
+
+            // 7. Optimasi Top Pembayar (Group by NOP di pembayaran dulu, baru join sppt)
+            $topPembayarRaw = (clone $baseQuery)
                 ->select([
-                    DB::raw("CONCAT(p.kd_provinsi, '.', p.kd_dati2, '.', p.kd_kecamatan, '.', p.kd_kelurahan, '.', p.kd_blok, '.', p.no_urut, '.', p.kd_jns_op) as No_NOP"),
-                    's.nm_wp_sppt as Nama_Pemilik',
+                    'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
                     DB::raw('SUM(p.jml_sppt_yg_dibayar - p.denda_sppt) as total_nilai'),
                     DB::raw('SUM(p.denda_sppt) as total_denda'),
                     DB::raw('SUM(p.jml_sppt_yg_dibayar) as total_bayar'),
                     DB::raw('COUNT(*) as jumlah_transaksi'),
                 ])
-                ->groupBy('No_NOP', 's.nm_wp_sppt')
+                ->groupBy('p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op')
                 ->orderByDesc('total_bayar')
                 ->limit(10)
                 ->get();
 
-            $topPembayar = $topPembayarRows->map(function ($row) {
+            // Ambil nama WP khusus untuk 10 top pembayar ini
+            $topSpptNames = [];
+            if ($topPembayarRaw->isNotEmpty()) {
+                $spptTopQuery = DB::connection('epbb_db')->table('sppt as s')->select('kd_propinsi', 'kd_dati2', 'kd_kecamatan', 'kd_kelurahan', 'kd_blok', 'no_urut', 'kd_jns_op', 'nm_wp_sppt');
+                foreach ($topPembayarRaw as $item) {
+                    $spptTopQuery->orWhere(function($q) use ($item) {
+                        $q->where('kd_propinsi', $item->kd_propinsi)
+                          ->where('kd_dati2', $item->kd_dati2)
+                          ->where('kd_kecamatan', $item->kd_kecamatan)
+                          ->where('kd_kelurahan', $item->kd_kelurahan)
+                          ->where('kd_blok', $item->kd_blok)
+                          ->where('no_urut', $item->no_urut)
+                          ->where('kd_jns_op', $item->kd_jns_op);
+                    });
+                }
+                $spptTopData = $spptTopQuery->get();
+                foreach ($spptTopData as $sppt) {
+                    $key = "{$sppt->kd_propinsi}.{$sppt->kd_dati2}.{$sppt->kd_kecamatan}.{$sppt->kd_kelurahan}.{$sppt->kd_blok}.{$sppt->no_urut}.{$sppt->kd_jns_op}";
+                    $topSpptNames[$key] = $sppt->nm_wp_sppt;
+                }
+            }
+
+            $topPembayar = $topPembayarRaw->map(function ($row) use ($topSpptNames) {
+                $nop = "{$row->kd_propinsi}.{$row->kd_dati2}.{$row->kd_kecamatan}.{$row->kd_kelurahan}.{$row->kd_blok}.{$row->no_urut}.{$row->kd_jns_op}";
                 return [
-                    'no_pokok_wp'      => $row->No_NOP, // Menggunakan NOP sebagai pengganti No Pokok WP untuk PBB
-                    'nama_pemilik'     => $row->Nama_Pemilik,
+                    'no_pokok_wp'      => $nop,
+                    'nama_pemilik'     => $topSpptNames[$nop] ?? 'NN',
                     'total_nilai'      => (float) $row->total_nilai,
                     'total_denda'      => (float) $row->total_denda,
                     'total_bayar'      => (float) $row->total_bayar,

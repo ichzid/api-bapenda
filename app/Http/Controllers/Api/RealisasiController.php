@@ -153,7 +153,7 @@ class RealisasiController extends Controller
                 ->map(fn ($item) => $this->formatPembayaranItem($item))
                 ->values();
 
-            $topPembayar = $this->fetchTopPembayar(clone $query);
+            $topPembayar = $this->fetchTopPembayar(clone $query, $jenisAsli);
 
             return response()->json([
                 'success' => true,
@@ -222,34 +222,50 @@ class RealisasiController extends Controller
      */
     private function buildStsDetailQuery($tahun, string $jenisPajak)
     {
-        return Sts::query()
+        $query = Sts::query()
             ->where('Jn_Pajak', $jenisPajak)
             ->where('Status_Bayar', 1)
             ->whereYear('Tgl_Bayar', $tahun);
+
+        if ($jenisPajak === 'BPHTB') {
+            $query->where('Nilai', '>', 0);
+        }
+
+        return $query;
     }
 
     /**
      * Mengambil 10 pembayar dengan total akumulasi pembayaran tertinggi
-     * dalam satu jenis pajak dan tahun tertentu, dikelompokkan per WP.
+     * dalam satu jenis pajak dan tahun tertentu.
+     * Jika Retribusi, group by Nama_Pemilik, selain itu per No_Pokok_WP.
      */
-    private function fetchTopPembayar($query): array
+    private function fetchTopPembayar($query, string $jenisAsli): array
     {
+        $selectFields = [
+            'Nama_Pemilik',
+            DB::raw('SUM(Nilai) as total_nilai'),
+            DB::raw('SUM(Denda) as total_denda'),
+            DB::raw('SUM(Nilai + Denda) as total_bayar'),
+            DB::raw('COUNT(*) as jumlah_transaksi'),
+        ];
+
+        $groupByFields = ['Nama_Pemilik'];
+
+        // Jika bukan retribusi, sertakan juga No_Pokok_WP
+        if ($jenisAsli !== 'Retribusi') {
+            array_unshift($selectFields, 'No_Pokok_WP');
+            array_unshift($groupByFields, 'No_Pokok_WP');
+        }
+
         $rows = (clone $query)
-            ->select([
-                'No_Pokok_WP',
-                'Nama_Pemilik',
-                DB::raw('SUM(Nilai) as total_nilai'),
-                DB::raw('SUM(Denda) as total_denda'),
-                DB::raw('SUM(Nilai + Denda) as total_bayar'),
-                DB::raw('COUNT(*) as jumlah_transaksi'),
-            ])
-            ->groupBy('No_Pokok_WP', 'Nama_Pemilik')
+            ->select($selectFields)
+            ->groupBy($groupByFields)
             ->orderByDesc('total_bayar')
             ->limit(10)
             ->get();
 
         return $rows->map(fn ($row) => [
-            'no_pokok_wp'      => $row->No_Pokok_WP,
+            'no_pokok_wp'      => $jenisAsli !== 'Retribusi' ? $row->No_Pokok_WP : null,
             'nama_pemilik'     => $row->Nama_Pemilik,
             'total_nilai'      => (float) $row->total_nilai,
             'total_denda'      => (float) $row->total_denda,

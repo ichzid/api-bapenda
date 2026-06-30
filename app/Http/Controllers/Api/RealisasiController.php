@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Sts;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -17,85 +18,88 @@ class RealisasiController extends Controller
     public function getRealisasi(Request $request)
     {
         $tahun = $request->input('tahun', Carbon::now()->year);
+        $cacheKey = "realisasi_overview_{$tahun}";
 
-        $jenisPajak = $this->getJenisPajakMapping();
-        $targetData = $this->getTargets();
+        return Cache::remember($cacheKey, 30, function () use ($tahun) {
+            $jenisPajak = $this->getJenisPajakMapping();
+            $targetData = $this->getTargets();
 
-        try {
-            // Fetch raw realization data from all sources
-            $stsData = $this->fetchMainRealisasi($tahun, array_keys($jenisPajak));
-            $pbbRealisasi = $this->fetchDataPBB($tahun);
-            $opsenData = $this->fetchDataOpsen();
+            try {
+                // Fetch raw realization data from all sources
+                $stsData = $this->fetchMainRealisasi($tahun, array_keys($jenisPajak));
+                $pbbRealisasi = $this->fetchDataPBB($tahun);
+                $opsenData = $this->fetchDataOpsen();
 
-            $totalTargetKeseluruhan = 0;
-            $totalRealisasiKeseluruhan = 0;
+                $totalTargetKeseluruhan = 0;
+                $totalRealisasiKeseluruhan = 0;
 
-            // Process and merge data
-            $formattedData = collect($jenisPajak)->map(function ($namaBaru, $jenisAsli) use (
-                $stsData, $targetData, $pbbRealisasi, $opsenData, &$totalTargetKeseluruhan, &$totalRealisasiKeseluruhan
-            ) {
-                // Determine Realisasi
-                $realisasi = 0;
-                if ($jenisAsli === 'PBB') {
-                    $realisasi = $pbbRealisasi;
-                } elseif ($jenisAsli === 'Opsen PKB') {
-                    $realisasi = $opsenData['pkb'];
-                } elseif ($jenisAsli === 'Opsen BBNKB') {
-                    $realisasi = $opsenData['bbnkb'];
-                } else {
-                    $item = $stsData->firstWhere('Jn_Pajak', $jenisAsli);
-                    $realisasi = $item ? (float) $item->total_realisasi : 0;
-                }
+                // Process and merge data
+                $formattedData = collect($jenisPajak)->map(function ($namaBaru, $jenisAsli) use (
+                    $stsData, $targetData, $pbbRealisasi, $opsenData, &$totalTargetKeseluruhan, &$totalRealisasiKeseluruhan
+                ) {
+                    // Determine Realisasi
+                    $realisasi = 0;
+                    if ($jenisAsli === 'PBB') {
+                        $realisasi = $pbbRealisasi;
+                    } elseif ($jenisAsli === 'Opsen PKB') {
+                        $realisasi = $opsenData['pkb'];
+                    } elseif ($jenisAsli === 'Opsen BBNKB') {
+                        $realisasi = $opsenData['bbnkb'];
+                    } else {
+                        $item = $stsData->firstWhere('Jn_Pajak', $jenisAsli);
+                        $realisasi = $item ? (float) $item->total_realisasi : 0;
+                    }
 
-                $target = $targetData[$jenisAsli] ?? 0;
-                $selisih = $realisasi - $target;
-                $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
-                $detailTersedia = $this->isDetailAvailableForJenis($jenisAsli);
+                    $target = $targetData[$jenisAsli] ?? 0;
+                    $selisih = $realisasi - $target;
+                    $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+                    $detailTersedia = $this->isDetailAvailableForJenis($jenisAsli);
 
-                // Accumulate totals
-                $totalTargetKeseluruhan += $target;
-                $totalRealisasiKeseluruhan += $realisasi;
+                    // Accumulate totals
+                    $totalTargetKeseluruhan += $target;
+                    $totalRealisasiKeseluruhan += $realisasi;
 
-                return [
-                    'jenis_pajak'       => $namaBaru,
-                    'kode_jenis_pajak'  => $jenisAsli,
-                    'slug_jenis_pajak'  => Str::slug($jenisAsli),
-                    'sumber_data'       => $this->resolveSumberData($jenisAsli),
-                    'detail_tersedia'   => $detailTersedia,
-                    'detail_endpoint'   => $detailTersedia
-                        ? '/api/realisasi-pajak/' . Str::slug($jenisAsli) . '/detail'
-                        : null,
-                    'target'            => $target,
-                    'realisasi'         => $realisasi,
-                    'persentase'        => round($persentase, 2),
-                    'selisih'           => $selisih,
-                ];
-            })->values();
+                    return [
+                        'jenis_pajak'       => $namaBaru,
+                        'kode_jenis_pajak'  => $jenisAsli,
+                        'slug_jenis_pajak'  => Str::slug($jenisAsli),
+                        'sumber_data'       => $this->resolveSumberData($jenisAsli),
+                        'detail_tersedia'   => $detailTersedia,
+                        'detail_endpoint'   => $detailTersedia
+                            ? '/api/realisasi-pajak/' . Str::slug($jenisAsli) . '/detail'
+                            : null,
+                        'target'            => $target,
+                        'realisasi'         => $realisasi,
+                        'persentase'        => round($persentase, 2),
+                        'selisih'           => $selisih,
+                    ];
+                })->values();
 
-            // Calculate global achievement percentage
-            $persentaseGlobal = $totalTargetKeseluruhan > 0 
-                ? ($totalRealisasiKeseluruhan / $totalTargetKeseluruhan) * 100 
-                : 0;
+                // Calculate global achievement percentage
+                $persentaseGlobal = $totalTargetKeseluruhan > 0 
+                    ? ($totalRealisasiKeseluruhan / $totalTargetKeseluruhan) * 100 
+                    : 0;
 
-            return response()->json([
-                'success'   => true,
-                'message'   => 'Data ringkasan realisasi & target berhasil diambil.',
-                'tahun'     => $tahun,
-                'ringkasan' => [
-                    'total_target'       => $totalTargetKeseluruhan,
-                    'total_realisasi'    => $totalRealisasiKeseluruhan,
-                    'persentase_capaian' => round($persentaseGlobal, 2),
-                    'selisih_anggaran'   => $totalRealisasiKeseluruhan - $totalTargetKeseluruhan
-                ],
-                'rincian'   => $formattedData,
-            ]);
-            
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
-            ], 500);
-        }
+                return response()->json([
+                    'success'   => true,
+                    'message'   => 'Data ringkasan realisasi & target berhasil diambil.',
+                    'tahun'     => $tahun,
+                    'ringkasan' => [
+                        'total_target'       => $totalTargetKeseluruhan,
+                        'total_realisasi'    => $totalRealisasiKeseluruhan,
+                        'persentase_capaian' => round($persentaseGlobal, 2),
+                        'selisih_anggaran'   => $totalRealisasiKeseluruhan - $totalTargetKeseluruhan
+                    ],
+                    'rincian'   => $formattedData,
+                ]);
+
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+                ], 500);
+            }
+        });
     }
 
     /**
@@ -129,12 +133,36 @@ class RealisasiController extends Controller
         }
 
         try {
-            $query = $this->buildStsDetailQuery($tahun, $jenisAsli);
             $target = $this->getTargets()[$jenisAsli] ?? 0;
-            $realisasi = (float) (clone $query)->sum('Nilai');
-            $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
-            $jumlahTransaksi = (clone $query)->count();
 
+            // Ringkasan & top pembayar di-cache (jarang berubah, mahal dihitung)
+            $cacheKey = "detail_ringkasan_{$jenisAsli}_{$tahun}";
+            $cachedRingkasan = Cache::remember($cacheKey, 30, function () use ($tahun, $jenisAsli, $target) {
+                $query = $this->buildStsDetailQuery($tahun, $jenisAsli);
+
+                // Gabung SUM + COUNT dalam 1 query (hemat 1x full scan)
+                $ringkasan = (clone $query)->select(
+                    DB::raw('SUM(Nilai) as total_realisasi'),
+                    DB::raw('COUNT(*) as total_transaksi')
+                )->first();
+
+                $realisasi = (float) ($ringkasan->total_realisasi ?? 0);
+                $jumlahTransaksi = (int) ($ringkasan->total_transaksi ?? 0);
+                $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+
+                return [
+                    'realisasi' => $realisasi,
+                    'jumlah_transaksi' => $jumlahTransaksi,
+                    'persentase_capaian' => round($persentase, 2),
+                    'sisa_anggaran' => $target - $realisasi,
+                ];
+            });
+
+            $realisasi = $cachedRingkasan['realisasi'];
+            $jumlahTransaksi = $cachedRingkasan['jumlah_transaksi'];
+
+            // Pagination (tidak di-cache karena per halaman berbeda)
+            $query = $this->buildStsDetailQuery($tahun, $jenisAsli);
             $pembayaranPaginator = (clone $query)
                 ->select([
                     'No_STS',
@@ -157,7 +185,12 @@ class RealisasiController extends Controller
                 ->map(fn ($item) => $this->formatPembayaranItem($item))
                 ->values();
 
-            $topPembayar = $this->fetchTopPembayar(clone $query, $jenisAsli);
+            // Top pembayar dari cache
+            $topPembayarCacheKey = "detail_top_{$jenisAsli}_{$tahun}";
+            $topPembayar = Cache::remember($topPembayarCacheKey, 30, function () use ($tahun, $jenisAsli) {
+                $topQuery = $this->buildStsDetailQuery($tahun, $jenisAsli);
+                return $this->fetchTopPembayar($topQuery, $jenisAsli);
+            });
 
             return response()->json([
                 'success' => true,
@@ -172,8 +205,8 @@ class RealisasiController extends Controller
                     'ringkasan' => [
                         'target' => $target,
                         'realisasi' => $realisasi,
-                        'persentase_capaian' => round($persentase, 2),
-                        'sisa_anggaran' => $target - $realisasi,
+                        'persentase_capaian' => $cachedRingkasan['persentase_capaian'],
+                        'sisa_anggaran' => $cachedRingkasan['sisa_anggaran'],
                         'jumlah_transaksi' => $jumlahTransaksi,
                     ],
                     'top_pembayar' => $topPembayar,
@@ -214,25 +247,40 @@ class RealisasiController extends Controller
     private function getDetailPBB($tahun, $page, $perPage, $jenisAsli, $jenisPajakMapping)
     {
         try {
-            // 1. Query dasar HANYA dari tabel pembayaran (tanpa JOIN) untuk performa
-            $baseQuery = DB::connection('epbb_db')
-                ->table('pembayaran_sppt as p')
-                ->whereYear('p.tgl_pembayaran_sppt', $tahun);
-
             $target = $this->getTargets()[$jenisAsli] ?? 0;
 
-            // 2. Optimasi Ringkasan (Aggregate 1x tembak)
-            $ringkasan = (clone $baseQuery)
-                ->select(
+            // Ringkasan & top pembayar di-cache
+            $cacheKey = "pbb_detail_ringkasan_{$tahun}";
+            $cachedRingkasan = Cache::remember($cacheKey, 30, function () use ($tahun, $target) {
+                $baseQuery = DB::connection('epbb_db')
+                    ->table('pembayaran_sppt as p')
+                    ->whereYear('p.tgl_pembayaran_sppt', $tahun);
+
+                $ringkasan = (clone $baseQuery)->select(
                     DB::raw('SUM(jml_sppt_yg_dibayar) as total_realisasi'),
                     DB::raw('COUNT(*) as total_transaksi')
                 )->first();
 
-            $realisasi = (float) ($ringkasan->total_realisasi ?? 0);
-            $jumlahTransaksi = (int) ($ringkasan->total_transaksi ?? 0);
-            $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+                $realisasi = (float) ($ringkasan->total_realisasi ?? 0);
+                $jumlahTransaksi = (int) ($ringkasan->total_transaksi ?? 0);
+                $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+
+                return [
+                    'realisasi' => $realisasi,
+                    'jumlah_transaksi' => $jumlahTransaksi,
+                    'persentase_capaian' => round($persentase, 2),
+                    'sisa_anggaran' => $target - $realisasi,
+                ];
+            });
+
+            $realisasi = $cachedRingkasan['realisasi'];
+            $jumlahTransaksi = $cachedRingkasan['jumlah_transaksi'];
 
             // 3. Ambil data pagination (Tanpa Join)
+            $baseQuery = DB::connection('epbb_db')
+                ->table('pembayaran_sppt as p')
+                ->whereYear('p.tgl_pembayaran_sppt', $tahun);
+
             $pembayaranPaginator = (clone $baseQuery)
                 ->select([
                     'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
@@ -297,53 +345,60 @@ class RealisasiController extends Controller
                 ];
             })->values();
 
-            // 7. Optimasi Top Pembayar (Group by NOP di pembayaran dulu, baru join sppt)
-            $topPembayarRaw = (clone $baseQuery)
-                ->select([
-                    'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
-                    DB::raw('SUM(p.jml_sppt_yg_dibayar - p.denda_sppt) as total_nilai'),
-                    DB::raw('SUM(p.denda_sppt) as total_denda'),
-                    DB::raw('SUM(p.jml_sppt_yg_dibayar) as total_bayar'),
-                    DB::raw('COUNT(*) as jumlah_transaksi'),
-                ])
-                ->groupBy('p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op')
-                ->orderByDesc('total_bayar')
-                ->limit(10)
-                ->get();
+            // 7. Optimasi Top Pembayar (di-cache 30 detik)
+            $topCacheKey = "pbb_detail_top_{$tahun}";
+            $topPembayar = Cache::remember($topCacheKey, 30, function () use ($tahun) {
+                $topQuery = DB::connection('epbb_db')
+                    ->table('pembayaran_sppt as p')
+                    ->whereYear('p.tgl_pembayaran_sppt', $tahun);
 
-            // Ambil nama WP khusus untuk 10 top pembayar ini
-            $topSpptNames = [];
-            if ($topPembayarRaw->isNotEmpty()) {
-                $spptTopQuery = DB::connection('epbb_db')->table('sppt as s')->select('kd_propinsi', 'kd_dati2', 'kd_kecamatan', 'kd_kelurahan', 'kd_blok', 'no_urut', 'kd_jns_op', 'nm_wp_sppt');
-                foreach ($topPembayarRaw as $item) {
-                    $spptTopQuery->orWhere(function($q) use ($item) {
-                        $q->where('kd_propinsi', $item->kd_propinsi)
-                          ->where('kd_dati2', $item->kd_dati2)
-                          ->where('kd_kecamatan', $item->kd_kecamatan)
-                          ->where('kd_kelurahan', $item->kd_kelurahan)
-                          ->where('kd_blok', $item->kd_blok)
-                          ->where('no_urut', $item->no_urut)
-                          ->where('kd_jns_op', $item->kd_jns_op);
-                    });
-                }
-                $spptTopData = $spptTopQuery->get();
-                foreach ($spptTopData as $sppt) {
-                    $key = "{$sppt->kd_propinsi}.{$sppt->kd_dati2}.{$sppt->kd_kecamatan}.{$sppt->kd_kelurahan}.{$sppt->kd_blok}.{$sppt->no_urut}.{$sppt->kd_jns_op}";
-                    $topSpptNames[$key] = $sppt->nm_wp_sppt;
-                }
-            }
+                $topPembayarRaw = (clone $topQuery)
+                    ->select([
+                        'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
+                        DB::raw('SUM(p.jml_sppt_yg_dibayar - p.denda_sppt) as total_nilai'),
+                        DB::raw('SUM(p.denda_sppt) as total_denda'),
+                        DB::raw('SUM(p.jml_sppt_yg_dibayar) as total_bayar'),
+                        DB::raw('COUNT(*) as jumlah_transaksi'),
+                    ])
+                    ->groupBy('p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan', 'p.kd_blok', 'p.no_urut', 'p.kd_jns_op')
+                    ->orderByDesc('total_bayar')
+                    ->limit(10)
+                    ->get();
 
-            $topPembayar = $topPembayarRaw->map(function ($row) use ($topSpptNames) {
-                $nop = "{$row->kd_propinsi}.{$row->kd_dati2}.{$row->kd_kecamatan}.{$row->kd_kelurahan}.{$row->kd_blok}.{$row->no_urut}.{$row->kd_jns_op}";
-                return [
-                    'no_pokok_wp'      => $nop,
-                    'nama_pemilik'     => $topSpptNames[$nop] ?? 'NN',
-                    'total_nilai'      => (float) $row->total_nilai,
-                    'total_denda'      => (float) $row->total_denda,
-                    'total_bayar'      => (float) $row->total_bayar,
-                    'jumlah_transaksi' => (int) $row->jumlah_transaksi,
-                ];
-            })->values()->all();
+                // Ambil nama WP khusus untuk 10 top pembayar ini
+                $topSpptNames = [];
+                if ($topPembayarRaw->isNotEmpty()) {
+                    $spptTopQuery = DB::connection('epbb_db')->table('sppt as s')->select('kd_propinsi', 'kd_dati2', 'kd_kecamatan', 'kd_kelurahan', 'kd_blok', 'no_urut', 'kd_jns_op', 'nm_wp_sppt');
+                    foreach ($topPembayarRaw as $item) {
+                        $spptTopQuery->orWhere(function($q) use ($item) {
+                            $q->where('kd_propinsi', $item->kd_propinsi)
+                              ->where('kd_dati2', $item->kd_dati2)
+                              ->where('kd_kecamatan', $item->kd_kecamatan)
+                              ->where('kd_kelurahan', $item->kd_kelurahan)
+                              ->where('kd_blok', $item->kd_blok)
+                              ->where('no_urut', $item->no_urut)
+                              ->where('kd_jns_op', $item->kd_jns_op);
+                        });
+                    }
+                    $spptTopData = $spptTopQuery->get();
+                    foreach ($spptTopData as $sppt) {
+                        $key = "{$sppt->kd_propinsi}.{$sppt->kd_dati2}.{$sppt->kd_kecamatan}.{$sppt->kd_kelurahan}.{$sppt->kd_blok}.{$sppt->no_urut}.{$sppt->kd_jns_op}";
+                        $topSpptNames[$key] = $sppt->nm_wp_sppt;
+                    }
+                }
+
+                return $topPembayarRaw->map(function ($row) use ($topSpptNames) {
+                    $nop = "{$row->kd_propinsi}.{$row->kd_dati2}.{$row->kd_kecamatan}.{$row->kd_kelurahan}.{$row->kd_blok}.{$row->no_urut}.{$row->kd_jns_op}";
+                    return [
+                        'no_pokok_wp'      => $nop,
+                        'nama_pemilik'     => $topSpptNames[$nop] ?? 'NN',
+                        'total_nilai'      => (float) $row->total_nilai,
+                        'total_denda'      => (float) $row->total_denda,
+                        'total_bayar'      => (float) $row->total_bayar,
+                        'jumlah_transaksi' => (int) $row->jumlah_transaksi,
+                    ];
+                })->values()->all();
+            });
 
             return response()->json([
                 'success' => true,
@@ -358,8 +413,8 @@ class RealisasiController extends Controller
                     'ringkasan' => [
                         'target' => $target,
                         'realisasi' => $realisasi,
-                        'persentase_capaian' => round($persentase, 2),
-                        'sisa_anggaran' => $target - $realisasi,
+                        'persentase_capaian' => $cachedRingkasan['persentase_capaian'],
+                        'sisa_anggaran' => $cachedRingkasan['sisa_anggaran'],
                         'jumlah_transaksi' => $jumlahTransaksi,
                     ],
                     'top_pembayar' => $topPembayar,

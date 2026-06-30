@@ -250,11 +250,12 @@ class RealisasiController extends Controller
             $target = $this->getTargets()[$jenisAsli] ?? 0;
 
             // Ringkasan di-cache
-            $cacheKey = "pbb_detail_ringkasan_v2_{$tahun}";
+            $cacheKey = "pbb_detail_ringkasan_v3_{$tahun}";
             $cachedRingkasan = Cache::remember($cacheKey, 30, function () use ($tahun, $target) {
                 $baseQuery = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
-                    ->whereYear('p.tgl_rekam_byr_sppt', $tahun);
+                    ->where('p.tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
+                    ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01');
 
                 $ringkasan = (clone $baseQuery)->select(
                     DB::raw('SUM(jml_sppt_yg_dibayar) as total_realisasi'),
@@ -280,7 +281,8 @@ class RealisasiController extends Controller
             $offset = ($page - 1) * $perPage;
             $baseQuery = DB::connection('epbb_db')
                 ->table('pembayaran_sppt as p')
-                ->whereYear('p.tgl_rekam_byr_sppt', $tahun);
+                ->where('p.tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
+                ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01');
 
             $rows = (clone $baseQuery)
                 ->select([
@@ -343,11 +345,12 @@ class RealisasiController extends Controller
             })->values();
 
             // Top Pembayar (di-cache)
-            $topCacheKey = "pbb_detail_top_v2_{$tahun}";
+            $topCacheKey = "pbb_detail_top_v3_{$tahun}";
             $topPembayar = Cache::remember($topCacheKey, 30, function () use ($tahun) {
                 $topPembayarRaw = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
-                    ->whereYear('p.tgl_rekam_byr_sppt', $tahun)
+                    ->where('p.tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
+                    ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01')
                     ->select([
                         'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan',
                         'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',

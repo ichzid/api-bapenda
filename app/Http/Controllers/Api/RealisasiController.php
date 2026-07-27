@@ -53,8 +53,10 @@ class RealisasiController extends Controller
                     $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
                     $detailTersedia = $this->isDetailAvailableForJenis($jenisAsli);
 
-                    $totalTargetKeseluruhan += $target;
-                    $totalRealisasiKeseluruhan += $realisasi;
+                    if ($jenisAsli !== 'Retribusi') {
+                        $totalTargetKeseluruhan += $target;
+                        $totalRealisasiKeseluruhan += $realisasi;
+                    }
 
                     $formattedData[] = [
                         'jenis_pajak'       => $namaBaru,

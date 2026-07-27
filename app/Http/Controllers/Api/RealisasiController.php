@@ -656,16 +656,16 @@ class RealisasiController extends Controller
     private function getTargets(): array
     {
         return [
-            'PBB' => 57950007794,
-            'BPHTB' => 23000000000,
+            'PBB' => 64002000000,
+            'BPHTB' => 10500000000,
             'Pajak Restoran' => 4000000000,
-            'Pajak Penerangan' => 76500000000,
+            'Pajak Penerangan' => 77265000000,
             'Pajak Hotel' => 350000000,
             'Pajak Parkir' => 150000000,
-            'Pajak Hiburan' => 80000000,
+            'Pajak Hiburan' => 100000000,
             'Pajak Reklame' => 1000000000,
-            'Pajak Air Tanah' => 2000000000,
-            'Pajak Galian' => 500000000,
+            'Pajak Air Tanah' => 2200000000,
+            'Pajak Galian' => 400000000,
             'Pajak Sarang Burung Walet' => 75000000,
             'Opsen PKB' => 10289383518,
             'Opsen BBNKB' => 11714467058,

@@ -100,6 +100,24 @@ return [
             ]) : [],
         ],
 
+        'eretribusi_db' => [
+            'driver' => env('DB_ERETRIBUSI_CONNECTION', 'mysql'),
+            'host' => env('DB_ERETRIBUSI_HOST', '127.0.0.1'),
+            'port' => env('DB_ERETRIBUSI_PORT', '3306'),
+            'database' => env('DB_ERETRIBUSI_DATABASE', ''),
+            'username' => env('DB_ERETRIBUSI_USERNAME', ''),
+            'password' => env('DB_ERETRIBUSI_PASSWORD', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => false,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                (PHP_VERSION_ID >= 80500 ? \Pdo\Mysql::ATTR_SSL_CA : \PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),

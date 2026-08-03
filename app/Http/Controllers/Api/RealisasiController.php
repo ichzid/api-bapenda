@@ -21,7 +21,7 @@ class RealisasiController extends Controller
         $cacheKey = "realisasi_overview_v2_{$tahun}";
 
         try {
-            $payload = Cache::remember($cacheKey, 30, function () use ($tahun) {
+            $payload = Cache::remember($cacheKey, 5, function () use ($tahun) {
                 $jenisPajak = $this->getJenisPajakMapping();
                 $targetData = $this->getTargets();
 
@@ -96,6 +96,72 @@ class RealisasiController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get ringkasan realisasi Retribusi Daerah.
+     */
+    public function getRealisasiRetribusi(Request $request)
+    {
+        $tahun = $request->integer('tahun', Carbon::now()->year);
+        $cacheKey = "realisasi_retribusi_overview_v2_{$tahun}";
+
+        try {
+            $payload = Cache::remember($cacheKey, 5, function () use ($tahun) {
+                $totalTarget = 0;
+                $totalRealisasi = 0;
+                $rincian = [];
+
+                foreach ($this->fetchRealisasiRetribusi($tahun) as $item) {
+                    $target = (float) $item['target'];
+                    $realisasi = (float) $item['realisasi'];
+                    $persentase = $target > 0 ? ($realisasi / $target) * 100 : 0;
+
+                    $totalTarget += $target;
+                    $totalRealisasi += $realisasi;
+
+                    $rincian[] = [
+                        'jenis_retribusi'      => $item['jenis_retribusi'],
+                        'nama_opd'             => $item['nama_opd'],
+                        'slug_jenis_retribusi' => Str::slug($item['jenis_retribusi']),
+                        'kelompok_retribusi'   => $item['kelompok_retribusi'],
+                        'sumber_data'          => 'sts_history+e_retribusi',
+                        'detail_tersedia'      => false,
+                        'detail_endpoint'      => null,
+                        'target'               => $target,
+                        'realisasi'            => $realisasi,
+                        'persentase'           => round($persentase, 2),
+                        'selisih'              => $realisasi - $target,
+                    ];
+                }
+
+                $persentaseGlobal = $totalTarget > 0
+                    ? ($totalRealisasi / $totalTarget) * 100
+                    : 0;
+
+                return [
+                    'success'   => true,
+                    'message'   => 'Data ringkasan realisasi & target retribusi berhasil diambil.',
+                    'tahun'     => $tahun,
+                    'ringkasan' => [
+                        'total_target'       => $totalTarget,
+                        'total_realisasi'    => $totalRealisasi,
+                        'persentase_capaian' => round($persentaseGlobal, 2),
+                        'selisih_anggaran'   => $totalRealisasi - $totalTarget,
+                    ],
+                    'rincian' => $rincian,
+                ];
+            });
+
+            return response()->json($payload);
+        } catch (\Exception $e) {
+            Cache::forget($cacheKey);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat mengambil data retribusi: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -648,6 +714,147 @@ class RealisasiController extends Controller
             'Opsen PKB', 'Opsen BBNKB' => 'simpada',
             default => 'sts_history',
         };
+    }
+
+    /**
+     * Mengambil realisasi pembayaran dari STS History dan melengkapi jenis/OPD
+     * dari database e_retribusi melalui nomor formulir.
+     */
+    private function fetchRealisasiRetribusi(int $tahun): array
+    {
+        $pembayaran = Sts::query()
+            ->select('No_NOP', DB::raw('SUM(Nilai) as total_realisasi'))
+            ->where('Jn_Pajak', 'Retribusi')
+            ->where('Status_Bayar', 1)
+            ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
+            ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+            ->groupBy('No_NOP')
+            ->get();
+
+        $formNumbers = $pembayaran->pluck('No_NOP')
+            ->filter(fn ($number) => $number !== null && $number !== '')
+            ->unique()
+            ->values();
+
+        $realisasiPerJenis = [];
+        if ($formNumbers->isNotEmpty()) {
+            DB::connection('eretribusi_db')
+                ->table('lap_skrd as l')
+                ->whereIn('l.no_form', $formNumbers->all())
+                ->select('l.no_form', 'l.idretribusi')
+                ->orderBy('l.no_form')
+                ->chunk(1000, function ($forms) use ($pembayaran, &$realisasiPerJenis) {
+                    $paymentsByForm = $pembayaran->keyBy(fn ($item) => (string) $item->No_NOP);
+
+                    foreach ($forms as $form) {
+                        $payment = $paymentsByForm->get((string) $form->no_form);
+                        if (! $payment) {
+                            continue;
+                        }
+
+                        $idJenis = (int) $form->idretribusi;
+                        $realisasiPerJenis[$idJenis] = ($realisasiPerJenis[$idJenis] ?? 0)
+                            + (float) $payment->total_realisasi;
+                    }
+                });
+        }
+
+        $masters = DB::connection('eretribusi_db')
+            ->table('jenis_retribusi as j')
+            ->leftJoin('opd_retribusi as o', 'o.id_opd', '=', 'j.opd_id')
+            ->select('j.id_jenis', 'j.nama_retribusi', 'o.nama_opd')
+            ->get()
+            ->keyBy('id_jenis');
+
+        return collect($this->getRetribusiTargets($tahun))
+            ->map(function ($target, $idJenis) use ($masters, $realisasiPerJenis) {
+                $master = $masters->get($idJenis);
+
+                return [
+                    'jenis_retribusi' => trim((string) ($master->nama_retribusi ?? $target['jenis_retribusi'])),
+                    'nama_opd' => trim((string) ($master->nama_opd ?? $target['nama_opd'])),
+                    'kelompok_retribusi' => $target['kelompok_retribusi'],
+                    'target' => $target['target'],
+                    'realisasi' => collect($target['sumber_id_jenis'] ?? [$idJenis])
+                        ->sum(fn ($sourceId) => $realisasiPerJenis[$sourceId] ?? 0),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Target retribusi berdasarkan laporan REALISASI RETRIBUSI 2026.
+     */
+    private function getRetribusiTargets(int $tahun): array
+    {
+        if ($tahun !== 2026) {
+            return [];
+        }
+
+        return [
+            1 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Umum',
+                'jenis_retribusi' => 'Retribusi Pelayanan Kesehatan - Puskesmas',
+                'nama_opd' => 'Dinas Kesehatan Pengendalian Penduduk dan Keluarga Berencana',
+                'target' => 1150000000,
+            ],
+            2 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Umum',
+                'jenis_retribusi' => 'Retribusi Pelayanan Kesehatan Rumah Sakit Umum',
+                'nama_opd' => 'Rumah Sakit Umum',
+                'target' => 16510000000,
+            ],
+            3 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Umum',
+                'jenis_retribusi' => 'Retribusi Pelayanan Persampahan/Kebersihan',
+                'nama_opd' => 'Dinas Perumahan Kawasan Permukiman dan Lingkungan Hidup',
+                'target' => 2500000000,
+            ],
+            4 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Umum',
+                'jenis_retribusi' => 'Retribusi Pelayanan Parkir di Tepi Jalan Umum',
+                'nama_opd' => 'Dinas Perhubungan',
+                'target' => 309000000,
+            ],
+            5 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Umum',
+                'jenis_retribusi' => 'Retribusi Pelayanan Pasar - Kios',
+                'nama_opd' => 'Dinas Ketenagakerjaan Perindustrian dan Perdagangan',
+                'target' => 360500000,
+            ],
+            20 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Usaha',
+                'jenis_retribusi' => 'Retribusi Pemakaian Kekayaan Daerah - Sewa Alat Berat',
+                'nama_opd' => 'Dinas PUPR',
+                'target' => 2500000000,
+            ],
+            21 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Usaha',
+                'jenis_retribusi' => 'Retribusi Tempat Pelelangan Ikan (TPI)',
+                'nama_opd' => 'Dinas Perikanan dan Peternakan',
+                'target' => 100000000,
+                'sumber_id_jenis' => [21, 27],
+            ],
+            14 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Usaha',
+                'jenis_retribusi' => 'Retribusi Tempat Pelelangan Ternak',
+                'nama_opd' => 'Dinas Perikanan dan Peternakan',
+                'target' => 0,
+            ],
+            15 => [
+                'kelompok_retribusi' => 'Retribusi Jasa Usaha',
+                'jenis_retribusi' => 'Retribusi Tempat Rekreasi dan Olahraga',
+                'nama_opd' => 'Dinas Pemuda, Olahraga, Kebudayaan dan Pariwisata',
+                'target' => 154500000,
+            ],
+            16 => [
+                'kelompok_retribusi' => 'Retribusi Perizinan Tertentu',
+                'jenis_retribusi' => 'Retribusi Persetujuan Bangunan Gedung',
+                'nama_opd' => 'Dinas Penanaman Modal dan Pelayanan Terpadu Satu Pintu',
+                'target' => 1030000000,
+            ],
+        ];
     }
 
     /**

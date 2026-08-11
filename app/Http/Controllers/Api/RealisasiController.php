@@ -18,7 +18,7 @@ class RealisasiController extends Controller
     public function getRealisasi(Request $request)
     {
         $tahun = $request->input('tahun', Carbon::now()->year);
-        $cacheKey = "realisasi_overview_v2_{$tahun}";
+        $cacheKey = "realisasi_overview_v3_{$tahun}";
 
         try {
             $payload = Cache::remember($cacheKey, 5, function () use ($tahun) {
@@ -666,7 +666,6 @@ class RealisasiController extends Controller
             'Pajak Sarang Burung Walet' => 'Pajak Sarang Burung Walet',
             'Opsen PKB' => 'Opsen PKB',
             'Opsen BBNKB' => 'Opsen BBNKB',
-            'Retribusi' => 'Retribusi Lainnya'
         ];
     }
 
@@ -876,7 +875,6 @@ class RealisasiController extends Controller
             'Pajak Sarang Burung Walet' => 75000000,
             'Opsen PKB' => 10289383518,
             'Opsen BBNKB' => 11714467058,
-            'Retribusi' => 6313000000
         ];
     }
 }

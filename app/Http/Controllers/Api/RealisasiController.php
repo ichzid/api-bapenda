@@ -8,6 +8,7 @@ use App\Models\Sts;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 class RealisasiController extends Controller
@@ -162,6 +163,198 @@ class RealisasiController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data retribusi: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get tren penerimaan bulanan pajak atau retribusi.
+     */
+    public function getTrenPenerimaan(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'tahun' => ['required', 'integer'],
+            'jenis' => ['required', 'in:pajak,retribusi'],
+            'kode' => ['nullable', 'string'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Parameter request tidak valid.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $tahun = (int) $request->input('tahun');
+        $jenis = $request->input('jenis');
+        $kode = $request->filled('kode') ? trim((string) $request->input('kode')) : null;
+
+        if ($kode !== null && $kode === '') {
+            $kode = null;
+        }
+
+        $jenisPajak = $this->getJenisPajakMapping();
+        if ($jenis === 'pajak' && in_array($kode, $this->getUnsupportedDetailJenis(), true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Opsen PKB dan Opsen BBNKB tidak tersedia pada tren penerimaan.',
+            ], 422);
+        }
+
+        if ($jenis === 'pajak' && $kode !== null && ! array_key_exists($kode, $jenisPajak)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Kode jenis pajak tidak ditemukan atau tidak sesuai kelompok pajak.',
+            ], 404);
+        }
+
+        $targetRetribusi = null;
+        if ($jenis === 'retribusi' && $kode !== null) {
+            if (! ctype_digit($kode) || ! array_key_exists((int) $kode, $this->getRetribusiTargets($tahun))) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Kode jenis retribusi tidak ditemukan atau tidak sesuai kelompok retribusi untuk tahun tersebut.',
+                ], 404);
+            }
+
+            $targetRetribusi = $this->getRetribusiTargets($tahun)[(int) $kode];
+        }
+
+        $cacheKey = 'tren_penerimaan_v1_' . md5(json_encode([
+            'tahun' => $tahun,
+            'jenis' => $jenis,
+            'kode' => $kode,
+        ]));
+
+        try {
+            $payload = Cache::remember($cacheKey, 5, function () use ($tahun, $jenis, $kode, $jenisPajak, $targetRetribusi) {
+                $realisasiPerBulan = array_fill(1, 12, 0.0);
+                $nama = null;
+
+                if ($jenis === 'pajak') {
+                    $kodeSts = array_values(array_diff(
+                        array_keys($jenisPajak),
+                        ['PBB', 'Opsen PKB', 'Opsen BBNKB']
+                    ));
+
+                    if ($kode === null || $kode !== 'PBB') {
+                        $query = Sts::query()
+                            ->selectRaw('MONTH(Tgl_Bayar) as bulan, SUM(Nilai) as total_realisasi')
+                            ->where('Status_Bayar', 1)
+                            ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
+                            ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+                            ->whereIn('Jn_Pajak', $kode === null ? $kodeSts : [$kode])
+                            ->groupByRaw('MONTH(Tgl_Bayar)')
+                            ->get();
+
+                        foreach ($query as $item) {
+                            $realisasiPerBulan[(int) $item->bulan] += (float) $item->total_realisasi;
+                        }
+                    }
+
+                    if ($kode === null || $kode === 'PBB') {
+                        $pbb = DB::connection('epbb_db')
+                            ->table('pembayaran_sppt')
+                            ->selectRaw('MONTH(tgl_rekam_byr_sppt) as bulan, SUM(jml_sppt_yg_dibayar) as total_realisasi')
+                            ->where('tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
+                            ->where('tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01')
+                            ->groupByRaw('MONTH(tgl_rekam_byr_sppt)')
+                            ->get();
+
+                        foreach ($pbb as $item) {
+                            $realisasiPerBulan[(int) $item->bulan] += (float) $item->total_realisasi;
+                        }
+                    }
+
+                    $nama = $kode !== null ? $jenisPajak[$kode] : null;
+                } elseif ($kode === null) {
+                    $rows = Sts::query()
+                        ->selectRaw('MONTH(Tgl_Bayar) as bulan, SUM(Nilai) as total_realisasi')
+                        ->where('Jn_Pajak', 'Retribusi')
+                        ->where('Status_Bayar', 1)
+                        ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
+                        ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+                        ->groupByRaw('MONTH(Tgl_Bayar)')
+                        ->get();
+
+                    foreach ($rows as $item) {
+                        $realisasiPerBulan[(int) $item->bulan] = (float) $item->total_realisasi;
+                    }
+                } else {
+                    $sourceIds = $targetRetribusi['sumber_id_jenis'] ?? [(int) $kode];
+                    $pembayaran = Sts::query()
+                        ->select('No_NOP')
+                        ->selectRaw('MONTH(Tgl_Bayar) as bulan, SUM(Nilai) as total_realisasi')
+                        ->where('Jn_Pajak', 'Retribusi')
+                        ->where('Status_Bayar', 1)
+                        ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
+                        ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+                        ->groupBy('No_NOP')
+                        ->groupByRaw('MONTH(Tgl_Bayar)')
+                        ->get();
+                    $formNumbers = $pembayaran->pluck('No_NOP')
+                        ->filter(fn ($number) => $number !== null && $number !== '')
+                        ->unique()
+                        ->values();
+
+                    if ($formNumbers->isNotEmpty()) {
+                        $paymentsByForm = $pembayaran->groupBy(fn ($item) => (string) $item->No_NOP);
+                        DB::connection('eretribusi_db')
+                            ->table('lap_skrd')
+                            ->whereIn('no_form', $formNumbers->all())
+                            ->whereIn('idretribusi', $sourceIds)
+                            ->select('no_form')
+                            ->orderBy('no_form')
+                            ->chunk(1000, function ($forms) use ($paymentsByForm, &$realisasiPerBulan) {
+                                foreach ($forms as $form) {
+                                    foreach ($paymentsByForm->get((string) $form->no_form, collect()) as $payment) {
+                                        $realisasiPerBulan[(int) $payment->bulan] += (float) $payment->total_realisasi;
+                                    }
+                                }
+                            });
+                    }
+
+                    $master = DB::connection('eretribusi_db')
+                        ->table('jenis_retribusi')
+                        ->where('id_jenis', (int) $kode)
+                        ->value('nama_retribusi');
+                    $nama = trim((string) ($master ?? $targetRetribusi['jenis_retribusi']));
+                }
+
+                $namaBulan = [
+                    1 => 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+                    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+                ];
+                $rincian = [];
+                foreach ($namaBulan as $bulan => $label) {
+                    $rincian[] = [
+                        'bulan' => $bulan,
+                        'nama_bulan' => $label,
+                        'realisasi' => (float) $realisasiPerBulan[$bulan],
+                    ];
+                }
+
+                return [
+                    'success' => true,
+                    'tahun' => $tahun,
+                    'jenis' => $jenis,
+                    'kode' => $kode,
+                    'nama' => $nama,
+                    'ringkasan' => [
+                        'total_realisasi' => (float) array_sum($realisasiPerBulan),
+                    ],
+                    'rincian' => $rincian,
+                ];
+            });
+
+            return response()->json($payload);
+        } catch (\Exception $e) {
+            Cache::forget($cacheKey);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat mengambil tren penerimaan: ' . $e->getMessage(),
             ], 500);
         }
     }

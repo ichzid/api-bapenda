@@ -11,3 +11,4 @@ Route::get('/user', function (Request $request) {
 Route::get('/realisasi-pajak', [RealisasiController::class, 'getRealisasi']);
 Route::get('/realisasi-pajak/{jenisPajak}/detail', [RealisasiController::class, 'getRealisasiDetail']);
 Route::get('/realisasi-retribusi', [RealisasiController::class, 'getRealisasiRetribusi']);
+Route::get('/tren-penerimaan', [RealisasiController::class, 'getTrenPenerimaan']);

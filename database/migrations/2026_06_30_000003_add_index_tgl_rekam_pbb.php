@@ -10,7 +10,8 @@ return new class extends Migration
         $connection = DB::connection('epbb_db');
 
         $indexExists = function (string $indexName) use ($connection): bool {
-            $rows = $connection->select("SHOW INDEX FROM pembayaran_sppt WHERE Key_name = ?", [$indexName]);
+            $rows = $connection->select('SHOW INDEX FROM pembayaran_sppt WHERE Key_name = ?', [$indexName]);
+
             return ! empty($rows);
         };
 

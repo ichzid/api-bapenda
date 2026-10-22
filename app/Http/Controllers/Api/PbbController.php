@@ -109,14 +109,14 @@ class PbbController extends Controller
             'objectAddress' => $this->joinAddress([
                 $object->jalan_op ?? null,
                 $object->blok_kav_no_op ?? null,
-                isset($object->rt_op) ? 'RT ' . $object->rt_op : null,
-                isset($object->rw_op) ? 'RW ' . $object->rw_op : null,
+                isset($object->rt_op) ? 'RT '.$object->rt_op : null,
+                isset($object->rw_op) ? 'RW '.$object->rw_op : null,
             ]),
             'taxpayerAddress' => $this->joinAddress([
                 $sppt->jln_wp_sppt,
                 $sppt->blok_kav_no_wp_sppt,
-                $sppt->rt_wp_sppt ? 'RT ' . $sppt->rt_wp_sppt : null,
-                $sppt->rw_wp_sppt ? 'RW ' . $sppt->rw_wp_sppt : null,
+                $sppt->rt_wp_sppt ? 'RT '.$sppt->rt_wp_sppt : null,
+                $sppt->rw_wp_sppt ? 'RW '.$sppt->rw_wp_sppt : null,
                 $sppt->kelurahan_wp_sppt,
                 $sppt->kota_wp_sppt,
             ]),
@@ -141,7 +141,7 @@ class PbbController extends Controller
         return DB::connection('epbb_db')
             ->table('sppt as s')
             ->where(array_combine(
-                array_map(fn ($key) => 's.' . $key, array_keys($parts)),
+                array_map(fn ($key) => 's.'.$key, array_keys($parts)),
                 array_values($parts)
             ));
     }
@@ -180,7 +180,7 @@ class PbbController extends Controller
             'year' => (int) $row->thn_pajak_sppt,
             'taxpayerName' => trim((string) $row->nm_wp_sppt),
             'dueDate' => Carbon::parse($row->tgl_jatuh_tempo_sppt)->format('d-m-Y'),
-            'penaltyInfo' => $penalty['months'] . ' bulan · ' . $penalty['percent'] . '%',
+            'penaltyInfo' => $penalty['months'].' bulan · '.$penalty['percent'].'%',
             'principal' => $principal,
             'penalty' => $penalty['amount'],
             'total' => $isPaid ? $principal + $paidPenalty : $penalty['total'],

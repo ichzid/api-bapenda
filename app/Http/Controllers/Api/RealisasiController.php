@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\Sts;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -58,18 +58,18 @@ class RealisasiController extends Controller
                     $totalRealisasiKeseluruhan += $realisasi;
 
                     $formattedData[] = [
-                        'jenis_pajak'       => $namaBaru,
-                        'kode_jenis_pajak'  => $jenisAsli,
-                        'slug_jenis_pajak'  => Str::slug($jenisAsli),
-                        'sumber_data'       => $this->resolveSumberData($jenisAsli),
-                        'detail_tersedia'   => $detailTersedia,
-                        'detail_endpoint'   => $detailTersedia
-                            ? '/api/realisasi-pajak/' . Str::slug($jenisAsli) . '/detail'
+                        'jenis_pajak' => $namaBaru,
+                        'kode_jenis_pajak' => $jenisAsli,
+                        'slug_jenis_pajak' => Str::slug($jenisAsli),
+                        'sumber_data' => $this->resolveSumberData($jenisAsli),
+                        'detail_tersedia' => $detailTersedia,
+                        'detail_endpoint' => $detailTersedia
+                            ? '/api/realisasi-pajak/'.Str::slug($jenisAsli).'/detail'
                             : null,
-                        'target'            => $target,
-                        'realisasi'         => $realisasi,
-                        'persentase'        => round($persentase, 2),
-                        'selisih'           => $selisih,
+                        'target' => $target,
+                        'realisasi' => $realisasi,
+                        'persentase' => round($persentase, 2),
+                        'selisih' => $selisih,
                     ];
                 }
 
@@ -78,25 +78,26 @@ class RealisasiController extends Controller
                     : 0;
 
                 return [
-                    'success'   => true,
-                    'message'   => 'Data ringkasan realisasi & target berhasil diambil.',
-                    'tahun'     => (int) $tahun,
+                    'success' => true,
+                    'message' => 'Data ringkasan realisasi & target berhasil diambil.',
+                    'tahun' => (int) $tahun,
                     'ringkasan' => [
-                        'total_target'       => $totalTargetKeseluruhan,
-                        'total_realisasi'    => $totalRealisasiKeseluruhan,
+                        'total_target' => $totalTargetKeseluruhan,
+                        'total_realisasi' => $totalRealisasiKeseluruhan,
                         'persentase_capaian' => round($persentaseGlobal, 2),
-                        'selisih_anggaran'   => $totalRealisasiKeseluruhan - $totalTargetKeseluruhan,
+                        'selisih_anggaran' => $totalRealisasiKeseluruhan - $totalTargetKeseluruhan,
                     ],
-                    'rincian'   => $formattedData,
+                    'rincian' => $formattedData,
                 ];
             });
 
             return response()->json($payload);
         } catch (\Exception $e) {
             Cache::forget($cacheKey);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+                'message' => 'Terjadi kesalahan: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -124,17 +125,17 @@ class RealisasiController extends Controller
                     $totalRealisasi += $realisasi;
 
                     $rincian[] = [
-                        'jenis_retribusi'      => $item['jenis_retribusi'],
-                        'nama_opd'             => $item['nama_opd'],
+                        'jenis_retribusi' => $item['jenis_retribusi'],
+                        'nama_opd' => $item['nama_opd'],
                         'slug_jenis_retribusi' => Str::slug($item['jenis_retribusi']),
-                        'kelompok_retribusi'   => $item['kelompok_retribusi'],
-                        'sumber_data'          => 'sts_history+e_retribusi',
-                        'detail_tersedia'      => false,
-                        'detail_endpoint'      => null,
-                        'target'               => $target,
-                        'realisasi'            => $realisasi,
-                        'persentase'           => round($persentase, 2),
-                        'selisih'              => $realisasi - $target,
+                        'kelompok_retribusi' => $item['kelompok_retribusi'],
+                        'sumber_data' => 'sts_history+e_retribusi',
+                        'detail_tersedia' => false,
+                        'detail_endpoint' => null,
+                        'target' => $target,
+                        'realisasi' => $realisasi,
+                        'persentase' => round($persentase, 2),
+                        'selisih' => $realisasi - $target,
                     ];
                 }
 
@@ -143,14 +144,14 @@ class RealisasiController extends Controller
                     : 0;
 
                 return [
-                    'success'   => true,
-                    'message'   => 'Data ringkasan realisasi & target retribusi berhasil diambil.',
-                    'tahun'     => $tahun,
+                    'success' => true,
+                    'message' => 'Data ringkasan realisasi & target retribusi berhasil diambil.',
+                    'tahun' => $tahun,
                     'ringkasan' => [
-                        'total_target'       => $totalTarget,
-                        'total_realisasi'    => $totalRealisasi,
+                        'total_target' => $totalTarget,
+                        'total_realisasi' => $totalRealisasi,
                         'persentase_capaian' => round($persentaseGlobal, 2),
-                        'selisih_anggaran'   => $totalRealisasi - $totalTarget,
+                        'selisih_anggaran' => $totalRealisasi - $totalTarget,
                     ],
                     'rincian' => $rincian,
                 ];
@@ -162,7 +163,7 @@ class RealisasiController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan saat mengambil data retribusi: ' . $e->getMessage(),
+                'message' => 'Terjadi kesalahan saat mengambil data retribusi: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -221,7 +222,7 @@ class RealisasiController extends Controller
             $targetRetribusi = $this->getRetribusiTargets($tahun)[(int) $kode];
         }
 
-        $cacheKey = 'tren_penerimaan_v1_' . md5(json_encode([
+        $cacheKey = 'tren_penerimaan_v1_'.md5(json_encode([
             'tahun' => $tahun,
             'jenis' => $jenis,
             'kode' => $kode,
@@ -243,7 +244,7 @@ class RealisasiController extends Controller
                             ->selectRaw('MONTH(Tgl_Bayar) as bulan, SUM(Nilai) as total_realisasi')
                             ->where('Status_Bayar', 1)
                             ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
-                            ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+                            ->where('Tgl_Bayar', '<', ($tahun + 1).'-01-01')
                             ->whereIn('Jn_Pajak', $kode === null ? $kodeSts : [$kode])
                             ->groupByRaw('MONTH(Tgl_Bayar)')
                             ->get();
@@ -258,7 +259,7 @@ class RealisasiController extends Controller
                             ->table('pembayaran_sppt')
                             ->selectRaw('MONTH(tgl_rekam_byr_sppt) as bulan, SUM(jml_sppt_yg_dibayar) as total_realisasi')
                             ->where('tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
-                            ->where('tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01')
+                            ->where('tgl_rekam_byr_sppt', '<', ($tahun + 1).'-01-01')
                             ->groupByRaw('MONTH(tgl_rekam_byr_sppt)')
                             ->get();
 
@@ -274,7 +275,7 @@ class RealisasiController extends Controller
                         ->where('Jn_Pajak', 'Retribusi')
                         ->where('Status_Bayar', 1)
                         ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
-                        ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+                        ->where('Tgl_Bayar', '<', ($tahun + 1).'-01-01')
                         ->groupByRaw('MONTH(Tgl_Bayar)')
                         ->get();
 
@@ -289,7 +290,7 @@ class RealisasiController extends Controller
                         ->where('Jn_Pajak', 'Retribusi')
                         ->where('Status_Bayar', 1)
                         ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
-                        ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+                        ->where('Tgl_Bayar', '<', ($tahun + 1).'-01-01')
                         ->groupBy('No_NOP')
                         ->groupByRaw('MONTH(Tgl_Bayar)')
                         ->get();
@@ -354,7 +355,7 @@ class RealisasiController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan saat mengambil tren penerimaan: ' . $e->getMessage(),
+                'message' => 'Terjadi kesalahan saat mengambil tren penerimaan: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -446,6 +447,7 @@ class RealisasiController extends Controller
             $topPembayarCacheKey = "detail_top_{$jenisAsli}_{$tahun}";
             $topPembayar = Cache::remember($topPembayarCacheKey, 30, function () use ($tahun, $jenisAsli) {
                 $topQuery = $this->buildStsDetailQuery($tahun, $jenisAsli);
+
                 return $this->fetchTopPembayar($topQuery, $jenisAsli);
             });
 
@@ -493,7 +495,7 @@ class RealisasiController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+                'message' => 'Terjadi kesalahan: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -512,7 +514,7 @@ class RealisasiController extends Controller
                 $baseQuery = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
                     ->where('p.tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
-                    ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01');
+                    ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1).'-01-01');
 
                 $ringkasan = (clone $baseQuery)->select(
                     DB::raw('SUM(jml_sppt_yg_dibayar) as total_realisasi'),
@@ -539,7 +541,7 @@ class RealisasiController extends Controller
             $baseQuery = DB::connection('epbb_db')
                 ->table('pembayaran_sppt as p')
                 ->where('p.tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
-                ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01');
+                ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1).'-01-01');
 
             $rows = (clone $baseQuery)
                 ->select([
@@ -570,7 +572,7 @@ class RealisasiController extends Controller
                         $item->kd_kelurahan, $item->kd_blok, $item->no_urut, $item->kd_jns_op
                     );
                 }
-                $sql = "SELECT kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op, nm_wp_sppt FROM sppt WHERE (kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op) IN (" . implode(',', $values) . ')';
+                $sql = 'SELECT kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op, nm_wp_sppt FROM sppt WHERE (kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op) IN ('.implode(',', $values).')';
                 $spptData = DB::connection('epbb_db')->select($sql, $bindings);
                 foreach ($spptData as $sppt) {
                     $key = "{$sppt->kd_propinsi}.{$sppt->kd_dati2}.{$sppt->kd_kecamatan}.{$sppt->kd_kelurahan}.{$sppt->kd_blok}.{$sppt->no_urut}.{$sppt->kd_jns_op}";
@@ -607,7 +609,7 @@ class RealisasiController extends Controller
                 $topPembayarRaw = DB::connection('epbb_db')
                     ->table('pembayaran_sppt as p')
                     ->where('p.tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
-                    ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01')
+                    ->where('p.tgl_rekam_byr_sppt', '<', ($tahun + 1).'-01-01')
                     ->select([
                         'p.kd_propinsi', 'p.kd_dati2', 'p.kd_kecamatan', 'p.kd_kelurahan',
                         'p.kd_blok', 'p.no_urut', 'p.kd_jns_op',
@@ -632,7 +634,7 @@ class RealisasiController extends Controller
                             $item->kd_kelurahan, $item->kd_blok, $item->no_urut, $item->kd_jns_op
                         );
                     }
-                    $sql = "SELECT kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op, nm_wp_sppt FROM sppt WHERE (kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op) IN (" . implode(',', $values) . ')';
+                    $sql = 'SELECT kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op, nm_wp_sppt FROM sppt WHERE (kd_propinsi, kd_dati2, kd_kecamatan, kd_kelurahan, kd_blok, no_urut, kd_jns_op) IN ('.implode(',', $values).')';
                     $spptTopData = DB::connection('epbb_db')->select($sql, $bindings);
                     foreach ($spptTopData as $sppt) {
                         $key = "{$sppt->kd_propinsi}.{$sppt->kd_dati2}.{$sppt->kd_kecamatan}.{$sppt->kd_kelurahan}.{$sppt->kd_blok}.{$sppt->no_urut}.{$sppt->kd_jns_op}";
@@ -642,12 +644,13 @@ class RealisasiController extends Controller
 
                 return $topPembayarRaw->map(function ($row) use ($topSpptNames) {
                     $nop = "{$row->kd_propinsi}.{$row->kd_dati2}.{$row->kd_kecamatan}.{$row->kd_kelurahan}.{$row->kd_blok}.{$row->no_urut}.{$row->kd_jns_op}";
+
                     return [
-                        'no_pokok_wp'      => $nop,
-                        'nama_pemilik'     => $topSpptNames[$nop] ?? 'NN',
-                        'total_nilai'      => (float) $row->total_nilai,
-                        'total_denda'      => (float) $row->total_denda,
-                        'total_bayar'      => (float) $row->total_bayar,
+                        'no_pokok_wp' => $nop,
+                        'nama_pemilik' => $topSpptNames[$nop] ?? 'NN',
+                        'total_nilai' => (float) $row->total_nilai,
+                        'total_denda' => (float) $row->total_denda,
+                        'total_bayar' => (float) $row->total_bayar,
                         'jumlah_transaksi' => (int) $row->jumlah_transaksi,
                     ];
                 })->values()->all();
@@ -697,7 +700,7 @@ class RealisasiController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan saat mengambil data PBB: ' . $e->getMessage(),
+                'message' => 'Terjadi kesalahan saat mengambil data PBB: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -763,11 +766,11 @@ class RealisasiController extends Controller
             ->get();
 
         return $rows->map(fn ($row) => [
-            'no_pokok_wp'      => $jenisAsli !== 'Retribusi' ? $row->No_Pokok_WP : null,
-            'nama_pemilik'     => $row->Nama_Pemilik,
-            'total_nilai'      => (float) $row->total_nilai,
-            'total_denda'      => (float) $row->total_denda,
-            'total_bayar'      => (float) $row->total_bayar,
+            'no_pokok_wp' => $jenisAsli !== 'Retribusi' ? $row->No_Pokok_WP : null,
+            'nama_pemilik' => $row->Nama_Pemilik,
+            'total_nilai' => (float) $row->total_nilai,
+            'total_denda' => (float) $row->total_denda,
+            'total_bayar' => (float) $row->total_bayar,
             'jumlah_transaksi' => (int) $row->jumlah_transaksi,
         ])->values()->all();
     }
@@ -805,10 +808,10 @@ class RealisasiController extends Controller
             $pbbData = DB::connection('epbb_db')
                 ->table('pembayaran_sppt')
                 ->where('tgl_rekam_byr_sppt', '>=', "{$tahun}-01-01")
-                ->where('tgl_rekam_byr_sppt', '<', ($tahun + 1) . '-01-01')
+                ->where('tgl_rekam_byr_sppt', '<', ($tahun + 1).'-01-01')
                 ->select(DB::raw('SUM(jml_sppt_yg_dibayar) AS total_realisasi'))
                 ->first();
-                
+
             return $pbbData && $pbbData->total_realisasi ? (float) $pbbData->total_realisasi : 0;
         } catch (\Exception $e) {
             return 0;
@@ -826,11 +829,11 @@ class RealisasiController extends Controller
                 ->where('id', 1)
                 ->select('pkb', 'bbnkb')
                 ->first();
-                
+
             if ($opsenData) {
                 return [
-                    'pkb'   => (float) $opsenData->pkb,
-                    'bbnkb' => (float) $opsenData->bbnkb
+                    'pkb' => (float) $opsenData->pkb,
+                    'bbnkb' => (float) $opsenData->bbnkb,
                 ];
             }
         } catch (\Exception $e) {
@@ -919,7 +922,7 @@ class RealisasiController extends Controller
             ->where('Jn_Pajak', 'Retribusi')
             ->where('Status_Bayar', 1)
             ->where('Tgl_Bayar', '>=', "{$tahun}-01-01")
-            ->where('Tgl_Bayar', '<', ($tahun + 1) . '-01-01')
+            ->where('Tgl_Bayar', '<', ($tahun + 1).'-01-01')
             ->groupBy('No_NOP')
             ->get();
 

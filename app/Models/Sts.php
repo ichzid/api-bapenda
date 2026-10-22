@@ -10,7 +10,9 @@ class Sts extends Model
     use HasFactory;
 
     protected $table = 'STS_History';
+
     // protected $connection = 'simpada'; // Uncomment if using specific connection
     public $timestamps = false;
+
     protected $guarded = [];
 }
